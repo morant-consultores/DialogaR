@@ -1,6 +1,27 @@
-.Rproj.user
+# History and session data
 .Rhistory
-.Rdata
-.httr-oauth
+.Rapp.history
+.RData
+.Ruserdata
+
+# Secrets and Credentials (CRITICAL)
+.Renviron
+.env
+**/*.env
+
+# Output files and backups
+backups_pl/
+output/
+*.xlsx
+*.csv
+*.rds
+*.json
+*.html
+*.pdf
+
+# RStudio specific files
+.Rproj.user/
+
+# OS generated files
 .DS_Store
-.quarto
+Thumbs.db
