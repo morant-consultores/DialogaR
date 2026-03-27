@@ -2,7 +2,7 @@
 % Please edit documentation in R/fct_semanal_mensual.R
 \name{construir_productividad_diaria}
 \alias{construir_productividad_diaria}
-\title{Construir productividad diaria + tablas (general / distrito / brigada) + flextables}
+\title{Construir Dashboards y Tablas de Productividad Diaria}
 \usage{
 construir_productividad_diaria(
   bd_actividad,
@@ -13,26 +13,55 @@ construir_productividad_diaria(
 )
 }
 \arguments{
-\item{bd_actividad}{Data frame con actividad (insumos$bd_actividad).
-Requiere columnas: fecha, usuario_num, seccion, desglose, afiliacion,
-duracion_minutos, fecha_inicio, fecha_fin.}
+\item{bd_actividad}{Tibble. Datos de actividad (típicamente \code{insumos$bd_actividad}).
+Columnas requeridas: \code{fecha}, \code{usuario_num}, \code{seccion}, \code{desglose}, \code{duracion_minutos},
+\code{fecha_inicio}, \code{fecha_fin}.}
 
-\item{bd_aux}{Data frame auxiliar (insumos$bd_aux).
-Requiere columnas (mínimas): distrito, municipio, nombre_brigada,
-nombre_coordinador, supervisor, vocero (para match), etc.}
+\item{bd_aux}{Tibble. Estructura administrativa (típicamente \code{insumos$bd_aux}).
+Columnas requeridas: \code{distrito}, \code{municipio}, \code{nombre_brigada}, \code{nombre_coordinador},
+\code{supervisor}, \code{vocero}.}
 
-\item{corte}{Valor de fecha (Date o character) a filtrar.}
+\item{pl}{Tibble. Registros de asistencia (ej. \code{insumos$pase_lista$pl_210}).
+Columnas requeridas: \code{usuario}, \code{fecha}, \code{obtener_usuario}, \code{observaciones} y \code{asistencia}.}
 
-\item{distritos}{Vector de distritos a resumir (ej. c("06","08","05","07","09")).}
+\item{corte}{Date o Character. La fecha de corte específica para filtrar el reporte diario.}
 
-\item{pl_210}{Pase de lista (insumos$pase_lista$pl_210).
-Requiere columnas: usuario, fecha, obtener_usuario, asistencia:last_col(),
-observaciones, viviendas, efectivos.}
+\item{distritos}{Character vector. Distritos específicos a incluir en el desglose
+detallado de coordinadores (ej. \code{c("06", "08", "05")}).}
 }
 \value{
-Lista con: registros, pl, bd_prod_voc, bd_prod_coord, bd_prod,
-tabla_acumulada, ft_resumen, resumen_detalle, ft_detalle.
+Una lista completa con 9 elementos:
+\item{registros}{Actividad de campo agregada por usuario.}
+\item{pl}{Registros de asistencia deduplicados.}
+\item{bd_prod_voc}{Datos de productividad cruzados a nivel vocero.}
+\item{bd_prod_coord}{Datos de productividad cruzados a nivel coordinador.}
+\item{bd_prod}{Tabla maestra consolidada de productividad.}
+\item{tabla_acumulada}{Tabla de resumen jerárquico (General -> Distrito -> Brigada).}
+\item{ft_resumen}{Objeto \code{flextable} formateado de \code{tabla_acumulada} con código de colores KPI.}
+\item{resumen_detalle}{Dataframe con el estatus de asistencia (✅/❌) de los coordinadores.}
+\item{ft_detalle}{Objeto \code{flextable} formateado de \code{resumen_detalle}.}
 }
 \description{
-Construir productividad diaria + tablas (general / distrito / brigada) + flextables
+Agrega la actividad operativa diaria en campo y la cruza con la estructura
+administrativa y los registros de asistencia (pase de lista). Calcula resúmenes
+jerárquicos (General, Distrito, Brigada) y genera objetos \code{flextable} listos
+para producción y reporteo.
+}
+\details{
+\strong{Lógica de Negocio y Reglas:}
+\itemize{
+\item \strong{Deduplicación de Asistencia:} Si un supervisor envía múltiples pases de lista
+para el mismo \emph{vocero} en un mismo día, los registros se colapsan en una sola cadena
+separada por comas para evitar la duplicación de filas en el cruce final.
+\item \strong{Agrupaciones Geográficas:} Resume las métricas de forma iterativa en tres niveles:
+Total (General), Distrito y Brigada.
+\item \strong{Código de Colores KPI (Flextable):}
+\itemize{
+\item \strong{Verde:} Promedio >= 14.5
+\item \strong{Amarillo:} Promedio >= 10.0
+\item \strong{Naranja:} Promedio < 10.0
+}
+\item \strong{Estatus de Coordinadores:} Genera indicadores visuales (✅/❌) que denotan si un
+coordinador envió su reporte de asistencia (\code{numero_pases_lista > 0}).
+}
 }

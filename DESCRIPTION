@@ -27,3 +27,6 @@ Imports:
     tidyr
 URL: https://github.com/morant-consultores/DialogaR
 BugReports: https://github.com/morant-consultores/DialogaR/issues
+Suggests: 
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3

@@ -11,6 +11,8 @@ generar_metricas_auditoria(
   voceros,
   corte,
   week_start = 1,
+  fecha_inicio = NULL,
+  fecha_fin = NULL,
   excluir_brigadas = "CAPACITACIONES"
 )
 }
@@ -23,9 +25,13 @@ generar_metricas_auditoria(
 
 \item{voceros}{Tibble. Catálogo de voceros.}
 
-\item{corte}{Date. Fecha de corte del reporte.}
+\item{corte}{Date. Fecha de corte del reporte. Usado para el cálculo dinámico si las fechas son NULL.}
 
 \item{week_start}{Numeric. Día de inicio de la semana (1 = Lunes, 6 = Sábado, 7 = Domingo). Por defecto 1.}
+
+\item{fecha_inicio}{Date. Límite inferior de la ventana. Si es \code{NULL}, se calcula dinámicamente usando \code{corte} y \code{week_start}.}
+
+\item{fecha_fin}{Date. Límite superior de la ventana. Si es \code{NULL}, se calcula dinámicamente usando \code{corte} y \code{week_start}.}
 
 \item{excluir_brigadas}{Character vector. Nombres o fragmentos de nombres de brigadas a excluir. Por defecto \code{"CAPACITACIONES"}.}
 }
