@@ -4,7 +4,7 @@
 \alias{crear_tabla_capacitacion}
 \title{Crear Tabla Base de Capacitación}
 \usage{
-crear_tabla_capacitacion(pool = pool, id_proyecto, numeros_prueba, brigadas)
+crear_tabla_capacitacion(pool, id_proyecto, numeros_prueba, brigadas)
 }
 \arguments{
 \item{pool}{Un objeto de conexión \code{pool} a la base de datos. Se asume que la
