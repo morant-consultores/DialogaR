@@ -101,7 +101,7 @@ metas <- readxl::read_excel(path_metas)
 secciones_completas <- readr::read_csv(path_secc_comp, show_col_types = FALSE)
 
 municipios_validos <- metas |>
-  dplyr::pull(municipio) |>
+  dplyr::pull(Municipio) |>
   unique() |>
   toupper() |>
   stringi::stri_trans_general("Latin-ASCII")
