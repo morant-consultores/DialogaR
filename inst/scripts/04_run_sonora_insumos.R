@@ -143,12 +143,11 @@ pool <- conectar_base_datos()
 cli::cli_h1("Iniciando Extracción ETL")
 
 procesador_pl <- function(pool, id_cuestionario) {
-  out <- procesar_pase_lista(
+  procesar_pase_lista(
     pool = pool,
     id_cuestionario = id_cuestionario,
     fecha_min = fecha_min_pl
   )
-  out$pase_lista
 }
 
 insumos <- cargar_insumos(
