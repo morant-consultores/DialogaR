@@ -10,8 +10,8 @@ crear_tabla_usuarios(bd, voceros_alta, coordinadores_alta, corte)
 \item{bd}{Un data frame que contiene los datos de actividad de los usuarios. Debe incluir las columnas:
 \itemize{
 \item \code{fecha}: Fecha de la actividad.
-\item \code{corte}: Fecha de corte de los datos.
 \item \code{usuario_num}: Identificador único de usuario.
+\item \code{desglose}: Tipo de resultado del diálogo (e.g. "Efectivo").
 \item \code{fecha_inicio}: Hora de inicio de actividad del usuario.
 \item \code{fecha_fin}: Hora de fin de actividad del usuario.
 }}
@@ -19,6 +19,8 @@ crear_tabla_usuarios(bd, voceros_alta, coordinadores_alta, corte)
 \item{voceros_alta}{Número total de voceros dados de alta.}
 
 \item{coordinadores_alta}{Número total de coordinadores dados de alta.}
+
+\item{corte}{Fecha de corte (\code{Date}). Solo se consideran los registros cuya \code{fecha} coincida con este valor.}
 }
 \value{
 Un data frame con las siguientes columnas:
@@ -32,3 +34,10 @@ Esta función procesa una base de datos de actividad de usuarios y genera un res
 con métricas clave como el número de usuarios activos, diálogos promedio por usuario,
 horas trabajadas y porcentaje de usuarios con al menos 6 horas laboradas.
 }
+\section{Seguridad y Privacidad}{
+
+Esta función procesa datos de actividad de usuarios (encuestadores) que pueden incluir
+identificadores de persona (\code{usuario_num}). Los resultados son métricas agregadas sin
+identificadores individuales. Cumple con ISO 27001 A.8.2 (clasificación de información).
+}
+
