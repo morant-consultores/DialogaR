@@ -40,17 +40,27 @@ coerce_numeric_candidates <- function(
     ))
 }
 
+#' Autentica con Google Drive usando una Service Account
+#'
+#' @description
+#' Lee las credenciales JSON desde la variable de entorno `drive_json`
+#' (codificada en Base64), las escribe en un archivo temporal y autentica
+#' la sesión de `googledrive` con esa Service Account.
+#'
+#' @return Invisible. Efecto secundario: sesión de `googledrive` autenticada.
+#'
+#' @section Seguridad y Privacidad:
+#' Las credenciales se leen desde una variable de entorno y nunca se escriben
+#' a disco de forma permanente. El archivo temporal es eliminado por el sistema
+#' operativo al finalizar la sesión de R.
+#'
+#' @export
 autenticar_googledrive <- function() {
-  json_creds_string <- rawToChar(base64enc::base64decode(Sys.getenv(
-    "drive_json"
-  )))
+  json_creds_string <- rawToChar(base64enc::base64decode(Sys.getenv("drive_json")))
 
-  # Crear un archivo JSON temporal para la autenticación
   temp_json_path <- tempfile(fileext = ".json")
   writeLines(json_creds_string, temp_json_path)
 
-  # 3. Autenticar usando la ruta al archivo JSON temporal
-  # Para Service Accounts, esta es la función correcta
   googledrive::drive_auth(path = temp_json_path)
 }
 
