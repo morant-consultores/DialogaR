@@ -1,3 +1,72 @@
+#' Copia una plantilla de script al directorio de trabajo
+#'
+#' @description
+#' Copia uno de los scripts de ejemplo incluidos en el paquete al directorio
+#' de trabajo actual, listo para ser adaptado al proyecto.
+#'
+#' @param plantilla Nombre de la plantilla. Opciones disponibles:
+#'   `"chihuahua"`, `"sonora"`, `"pase_lista"`, `"productividad_chihuahua"`.
+#'   Si se omite, imprime las opciones disponibles.
+#' @param destino Nombre del archivo de destino. Por defecto usa el nombre
+#'   original del script.
+#' @param sobreescribir Logical. Si `TRUE`, sobreescribe el archivo si ya existe.
+#'   Por defecto `FALSE`.
+#'
+#' @return La ruta del archivo copiado, de forma invisible.
+#'
+#' @examples
+#' \dontrun{
+#' usar_plantilla("sonora")
+#' usar_plantilla("chihuahua", destino = "mi_proyecto_chih.R")
+#' }
+#'
+#' @export
+usar_plantilla <- function(plantilla, destino = NULL, sobreescribir = FALSE) {
+  plantillas <- c(
+    chihuahua              = "scripts/03_run_chihuahua_insumos.R",
+    sonora                 = "scripts/04_run_sonora_insumos.R",
+    pase_lista             = "scripts/02_run_pase_lista.R",
+    productividad_chihuahua = "scripts/01_run_productividad_chihuahua.R"
+  )
+
+  if (missing(plantilla)) {
+    cli::cli_inform(c(
+      "i" = "Plantillas disponibles:",
+      " " = paste0("{.val ", names(plantillas), "}", collapse = ", ")
+    ))
+    return(invisible(NULL))
+  }
+
+  if (!plantilla %in% names(plantillas)) {
+    cli::cli_abort(c(
+      "x" = "Plantilla {.val {plantilla}} no encontrada.",
+      "i" = "Opciones: {.val {names(plantillas)}}"
+    ))
+  }
+
+  origen <- system.file(plantillas[[plantilla]], package = "DialogaR")
+  if (!nzchar(origen)) {
+    cli::cli_abort("No se encontró el archivo de la plantilla en el paquete instalado.")
+  }
+
+  if (is.null(destino)) {
+    destino <- basename(origen)
+  }
+
+  ruta_destino <- file.path(getwd(), destino)
+
+  if (file.exists(ruta_destino) && !sobreescribir) {
+    cli::cli_abort(c(
+      "x" = "El archivo {.file {destino}} ya existe.",
+      "i" = "Usa {.code sobreescribir = TRUE} para reemplazarlo."
+    ))
+  }
+
+  file.copy(origen, ruta_destino, overwrite = sobreescribir)
+  cli::cli_alert_success("Plantilla copiada a {.file {ruta_destino}}")
+  invisible(ruta_destino)
+}
+
 coerce_numeric_candidates <- function(
   df,
   exclude = c(
@@ -40,17 +109,27 @@ coerce_numeric_candidates <- function(
     ))
 }
 
+#' Autentica con Google Drive usando una Service Account
+#'
+#' @description
+#' Lee las credenciales JSON desde la variable de entorno `drive_json`
+#' (codificada en Base64), las escribe en un archivo temporal y autentica
+#' la sesión de `googledrive` con esa Service Account.
+#'
+#' @return Invisible. Efecto secundario: sesión de `googledrive` autenticada.
+#'
+#' @section Seguridad y Privacidad:
+#' Las credenciales se leen desde una variable de entorno y nunca se escriben
+#' a disco de forma permanente. El archivo temporal es eliminado por el sistema
+#' operativo al finalizar la sesión de R.
+#'
+#' @export
 autenticar_googledrive <- function() {
-  json_creds_string <- rawToChar(base64enc::base64decode(Sys.getenv(
-    "drive_json"
-  )))
+  json_creds_string <- rawToChar(base64enc::base64decode(Sys.getenv("drive_json")))
 
-  # Crear un archivo JSON temporal para la autenticación
   temp_json_path <- tempfile(fileext = ".json")
   writeLines(json_creds_string, temp_json_path)
 
-  # 3. Autenticar usando la ruta al archivo JSON temporal
-  # Para Service Accounts, esta es la función correcta
   googledrive::drive_auth(path = temp_json_path)
 }
 

@@ -1,3 +1,7 @@
 ^DialogaR\.Rproj$
 ^\.Rproj\.user$
 ^dev$
+^\.claude$
+^CLAUDE\.md$
+^backups_pl$
+^LICENSE\.md$

@@ -4,27 +4,43 @@ Version: 0.0.0.9000
 Authors@R: 
     person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
 Description: What the package does (one paragraph).
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
-Imports: 
+Imports:
+    base64enc,
     cli,
     data.table,
     DBI,
-    dbplyr,
     dplyr,
     flextable,
+    forcats,
+    geomtextpath,
+    ggfittext,
+    ggplot2,
+    ggrepel,
+    ggsflabel,
+    ggthemes,
+    glue,
+    googledrive,
+    gt,
+    gtExtras,
     janitor,
     jsonlite,
     lubridate,
+    odbc,
     officer,
     openxlsx,
+    pool,
     purrr,
     rlang,
+    scales,
+    sf,
     stringr,
-    tidyr
+    tibble,
+    tidyr,
+    writexl
 URL: https://github.com/morant-consultores/DialogaR
 BugReports: https://github.com/morant-consultores/DialogaR/issues
 Suggests: 

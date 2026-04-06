@@ -22,7 +22,8 @@ generar_reporte_productividad(
   sheet_name = as.character(corte),
   header_fill = "#7030A0",
   char_default = "-",
-  num_default = 0
+  num_default = 0,
+  col_geo_actividad = "seccion"
 )
 }
 \arguments{
@@ -67,6 +68,10 @@ de coordinadores:
 \item{numeric_threshold}{Proporción mínima (0–1) para convertir una columna
 character a numérica en el pase de lista.}
 
+\item{subir}{Objeto o ruta a subir a Google Drive. Si \code{NULL}, no se sube nada.}
+
+\item{carpeta_drive}{ID de la carpeta de Google Drive destino.}
+
 \item{sheet_name}{Nombre de la hoja de Excel.}
 
 \item{header_fill}{Color de fondo del encabezado en el Excel.}
@@ -75,8 +80,8 @@ character a numérica en el pase de lista.}
 
 \item{num_default}{Valor por defecto para campos numéricos faltantes.}
 
-\item{export_path}{Ruta del archivo Excel a generar. Si \code{NULL},
-no se genera archivo.}
+\item{col_geo_actividad}{Nombre de la columna geográfica en \code{actividad_dia}
+que se usará como columna de agrupación (por defecto \code{"seccion"}).}
 }
 \value{
 Una lista con:
@@ -84,8 +89,7 @@ Una lista con:
 \item \code{corte}: fecha del reporte,
 \item \code{pase_lista}: pase de lista procesado,
 \item \code{registros}: métricas de actividad agregadas,
-\item \code{bd_prod}: tabla final del reporte,
-\item \code{export_path}: ruta del archivo exportado (si aplica).
+\item \code{bd_prod}: tabla final del reporte.
 }
 }
 \description{
