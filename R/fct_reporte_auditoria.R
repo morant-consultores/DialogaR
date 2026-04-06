@@ -31,7 +31,7 @@
 #' @param bd_completa Tibble. Hechos de actividad operativa (registros).
 #' @param brigadas Tibble. Catálogo de brigadas.
 #' @param voceros Tibble. Catálogo de voceros.
-#' @param corte Date. Fecha de corte del reporte. Usado para el cálculo dinámico si las fechas son NULL.
+#' @param corte Date. Fecha de corte del reporte. Solo se usa como fallback; en modo dinámico la semana se ancla a la última fecha con auditorías reales en `EvaluacionRegistro`.
 #' @param week_start Numeric. Día de inicio de la semana (1 = Lunes, 6 = Sábado, 7 = Domingo). Por defecto 1.
 #' @param fecha_inicio Date. Límite inferior de la ventana. Si es `NULL`, se calcula dinámicamente usando `corte` y `week_start`.
 #' @param fecha_fin Date. Límite superior de la ventana. Si es `NULL`, se calcula dinámicamente usando `corte` y `week_start`.
@@ -51,28 +51,45 @@ generar_metricas_auditoria <- function(
   excluir_brigadas = "CAPACITACIONES"
 ) {
   # 1. Definición de Ventana Temporal (Dinámica vs Explícita)
-  if (is.null(fecha_inicio)) {
-    fecha_inicio_au <- lubridate::floor_date(
-      corte,
-      unit = "week",
-      week_start = week_start
-    )
+  # En modo dinámico, la semana se ancla a la última fecha auditada en
+  # EvaluacionRegistro, no a `corte`. Esto garantiza que siempre se reporte
+  # la semana con datos reales, aunque la semana actual no tenga auditorías aún.
+  if (is.null(fecha_inicio) || is.null(fecha_fin)) {
+    ids_auditados <- dplyr::tbl(pool, "EvaluacionRegistro") |>
+      dplyr::distinct(RegistroId) |>
+      dplyr::pull(RegistroId)
+
+    corte_efectivo <- bd_completa |>
+      dplyr::filter(as.integer(id) %in% ids_auditados) |>
+      dplyr::summarise(max = max(fecha, na.rm = TRUE)) |>
+      dplyr::pull(max) |>
+      as.Date()
   } else {
-    fecha_inicio_au <- as.Date(fecha_inicio)
+    corte_efectivo <- corte
   }
 
-  if (is.null(fecha_fin)) {
-    fecha_fin_au <- lubridate::ceiling_date(
-      corte,
-      unit = "week",
-      week_start = week_start
-    )
+  fecha_inicio_au <- if (!is.null(fecha_inicio)) {
+    as.Date(fecha_inicio)
   } else {
-    fecha_fin_au <- as.Date(fecha_fin)
+    lubridate::floor_date(corte_efectivo, unit = "week", week_start = week_start)
+  }
+
+  fecha_fin_au <- if (!is.null(fecha_fin)) {
+    as.Date(fecha_fin)
+  } else {
+    lubridate::ceiling_date(corte_efectivo, unit = "week", week_start = week_start)
   }
 
   # 2. Identificación de IDs operados en la ventana temporal
+  # Cada id se asigna a la semana de su PRIMERA aparición en bd_completa.
+  # Esto garantiza semanas mutuamente excluyentes: si el mismo registro tiene
+  # filas en varias semanas, solo se contabiliza en la semana donde nació.
   registros_id <- bd_completa |>
+    dplyr::summarise(
+      fecha      = min(fecha, na.rm = TRUE),
+      usuario_num = dplyr::first(usuario_num),
+      .by = id
+    ) |>
     dplyr::filter(fecha >= fecha_inicio_au & fecha < fecha_fin_au) |>
     dplyr::transmute(id = as.integer(id), usuario_num)
 
@@ -83,11 +100,11 @@ generar_metricas_auditoria <- function(
     )
   }
 
-  ids_validos <- registros_id |> dplyr::pull(id)
-
-  # 3. Extracción Optimizada (Evitamos el cuello de botella del collect prematuro)
+  # 3. Extracción Optimizada
+  # Colectamos EvaluacionRegistro completo y filtramos en R vía inner_join.
+  # Evita generar un IN (...) con miles de IDs en SQL, que es el principal
+  # cuello de botella cuando la ventana temporal cubre rangos amplios.
   evaluacion <- dplyr::tbl(pool, "EvaluacionRegistro") |>
-    dplyr::filter(RegistroId %in% !!ids_validos) |>
     dplyr::collect() |>
     dplyr::inner_join(registros_id, by = dplyr::join_by(RegistroId == id)) |>
     dplyr::mutate(
