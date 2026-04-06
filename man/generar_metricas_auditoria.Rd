@@ -25,7 +25,7 @@ generar_metricas_auditoria(
 
 \item{voceros}{Tibble. Catálogo de voceros.}
 
-\item{corte}{Date. Fecha de corte del reporte. Usado para el cálculo dinámico si las fechas son NULL.}
+\item{corte}{Date. Fecha de corte del reporte. Solo se usa como fallback; en modo dinámico la semana se ancla a la última fecha con auditorías reales en \code{EvaluacionRegistro}.}
 
 \item{week_start}{Numeric. Día de inicio de la semana (1 = Lunes, 6 = Sábado, 7 = Domingo). Por defecto 1.}
 

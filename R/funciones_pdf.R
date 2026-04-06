@@ -7,7 +7,10 @@
 #' @param dias_festivos Un vector de fechas correspondientes a los días festivos.
 #' @return Un número entero que representa el total de días trabajados.
 #' @examples
+#' \dontrun{
 #' calcular_dias_trabajados(bd, dias_festivos = c("2024-01-01", "2024-12-25"))
+#' }
+#' @noRd
 calcular_dias_trabajados <- function(bd, dias_festivos = NULL) {
   aux <- bd |>
     filter(lubridate::wday(fecha) != 1)
@@ -30,7 +33,10 @@ calcular_dias_trabajados <- function(bd, dias_festivos = NULL) {
 #' @param unidad La variable de agrupación utilizada para calcular la meta en cada grupo.
 #' @return Un data frame con la meta de viviendas calculada por unidad.
 #' @examples
+#' \dontrun{
 #' calcular_meta_zona("EntidadA", zona_seccion, p = 0.8, unidad = grupo)
+#' }
+#' @noRd
 calcular_meta_zona <- function(zona_seccion, metas_secc, p = 0.7, unidad) {
   zona_seccion |>
     left_join(metas_secc) |>
@@ -47,7 +53,10 @@ calcular_meta_zona <- function(zona_seccion, metas_secc, p = 0.7, unidad) {
 #' @param upper Un número que define el límite superior de la duración ideal de un diálogo en minutos.
 #' @return Un data frame con el resumen de diálogos efectivos y otros indicadores.
 #' @examples
+#' \dontrun{
 #' crear_tabla_dialogos(bd, lower = 5, upper = 15)
+#' }
+#' @noRd
 crear_tabla_dialogos <- function(
   bd,
   lower,
@@ -130,7 +139,9 @@ crear_tabla_dialogos <- function(
 #' @param dias_festivos Un vector de fechas correspondientes a los días festivos que deben excluirse del cálculo de días trabajados.
 #' @return Un data frame con el desglose de los resultados, organizado por categorías específicas.
 #' @examples
+#' \dontrun{
 #' crear_tabla_desglose(bd, dias_festivos = c("2024-01-01", "2024-12-25"))
+#' }
 # crear_tabla_desglose <- function(bd, dias_festivos){
 #   nombres <- c("Días trabajados", "Total de viviendas visitadas", "Diálogos rechazados", "No abrieron la puerta", "No pasaron los filtros", "Diálogos canceladas", "Penetración territorial")
 #   orden <- c("dias", "viviendas", "Rechazado", "No abrieron", "No pasaron filtros", "Cancelado", "Efectivo")
@@ -149,6 +160,7 @@ crear_tabla_dialogos <- function(
 #     tidyr::replace_na(replace = list(pct = "")) |>
 #     mutate(desglose = as.character(desglose))
 # }
+#' @noRd
 crear_tabla_desglose <- function(
   bd,
   bd_juarez = NULL,
@@ -239,7 +251,10 @@ crear_tabla_desglose <- function(
 #' @param corte Una fecha de corte (`Date`) que indica el límite superior de fechas a completar en el historial.
 #' @return Un data frame con las fechas completadas desde la primera fecha hasta el corte, con el conteo diario de diálogos efectivos, el promedio diario, un label formateado y el acumulado.
 #' @examples
+#' \dontrun{
 #' procesamiento_efectivos_historico(bd, corte = as.Date("2024-12-31"))
+#' }
+#' @noRd
 procesamiento_efectivos_historico <- function(bd, corte) {
   bd |>
     filter(desglose == "Efectivo") |>
@@ -260,7 +275,10 @@ procesamiento_efectivos_historico <- function(bd, corte) {
 #' @param fecha_fin Una fecha de fin (`Date`) que indica el límite superior del rango de fechas a calcular.
 #' @return Un número entero que representa el total de días hábiles (excluyendo domingos y días festivos) entre la primera fecha de `bd` y `fecha_fin`.
 #' @examples
+#' \dontrun{
 #' calcular_dias_fin(bd, fecha_fin = as.Date("2024-12-31"))
+#' }
+#' @noRd
 calcular_dias_fin <- function(bd, fecha_fin, dias_festivos) {
   aux <- tibble(
     "fecha" = as.Date(seq.Date(
@@ -292,7 +310,10 @@ calcular_dias_fin <- function(bd, fecha_fin, dias_festivos) {
 #' @param dias_fin Número total de días hábiles disponibles para alcanzar la meta.
 #' @return Un data frame con el cálculo del semáforo por zona, incluyendo el porcentaje de cumplimiento (`semaforo`) y un color representativo (`color`).
 #' @examples
+#' \dontrun{
 #' calcular_semaforo(bd, meta_zona, dias_fin = 20)
+#' }
+#' @noRd
 calcular_semaforo <- function(bd, meta_zona, dias_fin) {
   aux <- bd |>
     filter(desglose == "Efectivo") |>
@@ -327,7 +348,10 @@ calcular_semaforo <- function(bd, meta_zona, dias_fin) {
 #'
 #' @return Un data frame que muestra un resumen detallado por zona, incluyendo información sobre visitas y avance de metas en formato porcentual y numérico.
 #' @examples
+#' \dontrun{
 #' calcular_tabla_zona()
+#' }
+#' @noRd
 calcular_tabla_zona <- function(bd = bd) {
   viviendas_visitadas <- bd |>
     count(zona, name = "Viviendas visitadas")
@@ -421,7 +445,10 @@ calcular_duracion_dialogos <- function(bd, low_lim = 5, upper_lim = 7, corte) {
 #' @param semaforo Un data frame que contiene la meta diaria de diálogos efectivos por zona, incluyendo una columna `meta_diaria` con la meta diaria de cada zona.
 #' @return Un data frame con el cálculo diario del número de brigadistas requeridos para alcanzar la meta de diálogos, basado en un promedio de 15 diálogos por brigadista por día.
 #' @examples
+#' \dontrun{
 #' calcular_brigadistas_requeridos(bd, dias_a_fin = 20, semaforo = semaforo)
+#' }
+#' @noRd
 calcular_brigadistas_requeridos <- function(
   bd,
   dias_a_fin = dias_a_fin,
@@ -446,7 +473,10 @@ calcular_brigadistas_requeridos <- function(
 #' @param corte Una fecha de corte (`Date`) que indica el límite superior de fechas a completar en la serie.
 #' @return Un data frame con el conteo diario de brigadistas únicos activos, completando los días sin registros hasta la fecha de corte y asignando un valor de 0 en esos días.
 #' @examples
+#' \dontrun{
 #' #calcular_brigadistas_dia(bd, corte = as.Date("2024-12-31"))
+#' }
+#' @noRd
 calcular_brigadistas_dia <- function(bd, corte) {
   bd |>
     filter(afiliados > 0) |>
@@ -479,7 +509,10 @@ calcular_brigadistas_dia2 <- function(bd, corte) {
 #' @param corte Una fecha de corte (`Date`) que indica el límite superior de fechas a completar en la serie.
 #' @return Un data frame con el promedio de diálogos efectivos por día, completando fechas faltantes hasta el corte y asignando un valor promedio de `0` en días sin registros.
 #' @examples
+#' \dontrun{
 #' calcular_dialogos_promedio(bd, corte = as.Date("2024-12-31"))
+#' }
+#' @noRd
 calcular_dialogos_promedio <- function(bd, corte) {
   res <- bd |>
     filter(desglose == "Efectivo") |>
@@ -503,7 +536,10 @@ calcular_dialogos_promedio <- function(bd, corte) {
 #' @param zonas Un vector de todas las zonas posibles para completar el conteo de brigadistas en zonas sin actividad en la fecha de corte.
 #' @return Un data frame con el número de brigadistas activos en cada zona en la fecha de corte, completando zonas faltantes y aplicando el color de relleno.
 #' @examples
+#' \dontrun{
 #' calcular_brigadistas_corte(bd, corte = as.Date("2024-12-31"), zonas = zonas)
+#' }
+#' @noRd
 calcular_brigadistas_corte <- function(
   bd,
   corte,
@@ -530,7 +566,10 @@ calcular_brigadistas_corte <- function(
 #' @param corte Una fecha de corte (`Date`) hasta la cual se desea completar la serie de fechas diarias.
 #' @return Un data frame con el promedio diario de horas trabajadas por brigadista, completando días faltantes hasta la fecha de corte y asignando un valor de 0 en días sin registros.
 #' @examples
+#' \dontrun{
 #' calcular_horas_trabajadas(bd, corte = as.Date("2024-12-31"))
+#' }
+#' @noRd
 calcular_horas_trabajadas <- function(bd, corte) {
   bd |>
     group_by(fecha = as.Date(fecha_inicio), usuario_num) |>
@@ -558,7 +597,10 @@ calcular_horas_trabajadas <- function(bd, corte) {
 #' @param ... Variables adicionales para agrupar y contar, permitiendo segmentar el conocimiento en distintas categorías.
 #' @return Un data frame con el conteo de diálogos efectivos por cada categoría especificada y su proporción (`media`).
 #' @examples
+#' \dontrun{
 #' calcular_conocimiento(bd, zona, usuario_num)
+#' }
+#' @noRd
 calcular_conocimiento <- function(bd, ...) {
   bd |>
     filter(desglose == "Efectivo") |>
@@ -578,6 +620,7 @@ calcular_conocimiento <- function(bd, ...) {
 #' @param fill Un color hexadecimal para el relleno, utilizado en visualizaciones (por defecto es "#6B3A8C").
 #' @param unidad Una cadena opcional que indica el nombre de una columna para agrupar la opinión por una unidad específica (por defecto es `NULL`).
 #' @return Un data frame con el conteo y proporción de opiniones sobre la variable seleccionada, incluyendo una etiqueta de porcentaje y un color de relleno.
+#' @noRd
 calcular_opinion <- function(
   bd,
   var_conocimiento,
@@ -635,7 +678,10 @@ calcular_opinion <- function(
 #' @param valor El valor específico de `variable` que se desea filtrar en `bd`.
 #' @return Un objeto `sf` con la capa espacial combinada y filtrada según la proporción de actividad y el valor de la variable especificada.
 #' @examples
+#' \dontrun{
 #' crear_shp_candidato(shp, meta, bd, variable = "apoyo", valor = "Alto")
+#' }
+#' @noRd
 crear_shp_candidato <- function(shp, meta, bd, variable, valor) {
   aux <- meta |>
     left_join(bd) |>
@@ -660,7 +706,10 @@ crear_shp_candidato <- function(shp, meta, bd, variable, valor) {
 #' @param meta_diaria Meta diaria de diálogos efectivos, utilizada en el cálculo de la meta acumulada.
 #' @return Una gráfica de diálogos efectivos acumulados o diarios, ya sea interactiva o estática.
 #' @examples
+#' \dontrun{
 #' graficar_efectivos_historico(bd, color_linea_acum = "#3498db", color_meta_me = "#e74c3c", acumulado = TRUE, interactivo = FALSE, total_usuario = 50, meta_diaria = 100)
+#' }
+#' @noRd
 graficar_efectivos_historico <- function(
   bd,
   color_linea_acum,
@@ -1385,7 +1434,10 @@ crear_tabla_usuarios <- function(bd, voceros_alta, coordinadores_alta, corte) {
 #' @param color_high Nombre maximo del gradiente
 #' @return Un mapa con degradado segun los valores de `n` en cada poligono
 #' @examples
+#' \dontrun{
 #' calcular_dias_trabajados(bd, dias_festivos = c("2024-01-01", "2024-12-25"))
+#' }
+#' @noRd
 creacion_mapas_dialogos <- function(
   bd,
   nombre_mapa,

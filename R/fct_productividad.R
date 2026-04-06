@@ -558,8 +558,9 @@ exportar_productividad_excel <- function(
 #' @param numeric_threshold Proporción mínima (0–1) para convertir una columna
 #'   character a numérica en el pase de lista.
 #'
-#' @param export_path Ruta del archivo Excel a generar. Si `NULL`,
-#'   no se genera archivo.
+#' @param subir Objeto o ruta a subir a Google Drive. Si `NULL`, no se sube nada.
+#'
+#' @param carpeta_drive ID de la carpeta de Google Drive destino.
 #'
 #' @param sheet_name Nombre de la hoja de Excel.
 #'
@@ -569,13 +570,15 @@ exportar_productividad_excel <- function(
 #'
 #' @param num_default Valor por defecto para campos numéricos faltantes.
 #'
+#' @param col_geo_actividad Nombre de la columna geográfica en `actividad_dia`
+#'   que se usará como columna de agrupación (por defecto `"seccion"`).
+#'
 #' @return
 #' Una lista con:
 #' - `corte`: fecha del reporte,
 #' - `pase_lista`: pase de lista procesado,
 #' - `registros`: métricas de actividad agregadas,
-#' - `bd_prod`: tabla final del reporte,
-#' - `export_path`: ruta del archivo exportado (si aplica).
+#' - `bd_prod`: tabla final del reporte.
 #'
 #' @export
 generar_reporte_productividad <- function(
@@ -663,12 +666,6 @@ generar_reporte_productividad <- function(
 
 
 generar_tablas_reporte <- function(bd_prod) {
-  require(dplyr)
-  require(flextable)
-  require(tidyr)
-  require(stringr)
-  require(officer)
-
   # --- 1. PROCESAMIENTO TABLA ACUMULADA (RESUMEN) ---
   nombres <- bd_prod |> 
     filter(!nombre_brigada == "-", !str_detect(nombre_brigada, "CAPACITACIONES")) |> 

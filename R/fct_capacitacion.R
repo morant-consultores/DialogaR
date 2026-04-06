@@ -127,7 +127,6 @@ obtener_respuestas_capacitacion <- function(pool, ids, id_proyecto) {
 #' }
 #'
 #' @importFrom googledrive drive_upload drive_get as_id
-#' @importFrom readr write_excel_csv
 #' @importFrom dplyr tbl filter transmute left_join relocate select collect
 #' @importFrom lubridate today
 #' @export

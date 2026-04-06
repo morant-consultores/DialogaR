@@ -17,7 +17,7 @@
 #'   * **Verde:** Promedio >= 14.5
 #'   * **Amarillo:** Promedio >= 10.0
 #'   * **Naranja:** Promedio < 10.0
-#' * **Estatus de Coordinadores:** Genera indicadores visuales (✅/❌) que denotan si un
+#' * **Estatus de Coordinadores:** Genera indicadores visuales (OK/NO) que denotan si un
 #'   coordinador envió su reporte de asistencia (`numero_pases_lista > 0`).
 #'
 #' @param bd_actividad Tibble. Datos de actividad (típicamente `insumos$bd_actividad`).
@@ -40,7 +40,7 @@
 #' \item{bd_prod}{Tabla maestra consolidada de productividad.}
 #' \item{tabla_acumulada}{Tabla de resumen jerárquico (General -> Distrito -> Brigada).}
 #' \item{ft_resumen}{Objeto `flextable` formateado de `tabla_acumulada` con código de colores KPI.}
-#' \item{resumen_detalle}{Dataframe con el estatus de asistencia (✅/❌) de los coordinadores.}
+#' \item{resumen_detalle}{Dataframe con el estatus de asistencia (OK/NO) de los coordinadores.}
 #' \item{ft_detalle}{Objeto `flextable` formateado de `resumen_detalle`.}
 #'
 #' @importFrom dplyr filter group_by summarise if_else n_distinct first n mutate select across everything bind_rows full_join join_by left_join arrange distinct transmute pull case_when starts_with

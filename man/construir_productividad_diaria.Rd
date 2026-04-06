@@ -38,7 +38,7 @@ Una lista completa con 9 elementos:
 \item{bd_prod}{Tabla maestra consolidada de productividad.}
 \item{tabla_acumulada}{Tabla de resumen jerárquico (General -> Distrito -> Brigada).}
 \item{ft_resumen}{Objeto \code{flextable} formateado de \code{tabla_acumulada} con código de colores KPI.}
-\item{resumen_detalle}{Dataframe con el estatus de asistencia (✅/❌) de los coordinadores.}
+\item{resumen_detalle}{Dataframe con el estatus de asistencia (OK/NO) de los coordinadores.}
 \item{ft_detalle}{Objeto \code{flextable} formateado de \code{resumen_detalle}.}
 }
 \description{
@@ -61,7 +61,7 @@ Total (General), Distrito y Brigada.
 \item \strong{Amarillo:} Promedio >= 10.0
 \item \strong{Naranja:} Promedio < 10.0
 }
-\item \strong{Estatus de Coordinadores:} Genera indicadores visuales (✅/❌) que denotan si un
+\item \strong{Estatus de Coordinadores:} Genera indicadores visuales (OK/NO) que denotan si un
 coordinador envió su reporte de asistencia (\code{numero_pases_lista > 0}).
 }
 }
