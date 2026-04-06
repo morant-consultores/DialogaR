@@ -232,14 +232,12 @@ preparar_pase_lista <- function(
 
 
 # ---- 2) Métricas de actividad (agregación para el reporte) -----------------
-
 resumir_actividad <- function(
   actividad,
   missing_policy = c("lenient", "strict"),
   col_usuario = "usuario_num",
-  col_seccion = "seccion",
+  col_seccion = "seccion", # Parámetro que define el nombre de la columna geográfica
   col_desglose = "desglose",
-  #col_afiliacion = "afiliacion",
   col_duracion = "duracion_minutos",
   col_inicio = "fecha_inicio",
   col_fin = "fecha_fin"
@@ -250,9 +248,10 @@ resumir_actividad <- function(
     if (missing_policy == "strict") {
       stop("No hay actividad para la ventana solicitada.")
     }
+    # Usamos !! (bang-bang) y := para inyectar dinámicamente el nombre de la columna
     return(tibble::tibble(
       usuario_num = character(),
-      seccion = character(),
+      !!col_seccion := character(),
       viviendas_visitadas_nube = integer(),
       dialogos_efectivos_nube = integer(),
       no_abrieron_nube = integer(),
@@ -268,7 +267,8 @@ resumir_actividad <- function(
   actividad |>
     dplyr::group_by(.data[[col_usuario]]) |>
     dplyr::summarise(
-      seccion = dplyr::case_when(
+      # Usamos "{var}" := para nombrar la columna de salida dinámicamente
+      "{col_seccion}" := dplyr::case_when(
         dplyr::n_distinct(.data[[col_seccion]]) > 1 ~ paste(
           unique(.data[[col_seccion]]),
           collapse = ", "
@@ -314,7 +314,7 @@ resumir_actividad <- function(
 ensamblar_productividad <- function(
   bd_aux,
   registros,
-  pl,
+  pl = NULL, # Valor por defecto explícito
   include_coordinators = TRUE,
   coordinator_scope = c("from_structure", "from_pl"),
   coordinator_grain = c("coordinator_only", "coordinator_by_brigade")
@@ -322,22 +322,37 @@ ensamblar_productividad <- function(
   coordinator_scope <- match.arg(coordinator_scope)
   coordinator_grain <- match.arg(coordinator_grain)
 
-  # Voceros: estructura + métricas + pase
+  # FAIL-FAST (ISO 27000): Prevenir estados inconsistentes
+  if (is.null(pl) && coordinator_scope == "from_pl") {
+    stop(
+      "Conflicto de parámetros: No se puede usar coordinator_scope = 'from_pl' si 'pl' es NULL."
+    )
+  }
+
+  # Voceros: estructura + métricas + pase (condicional)
   bd_prod_voc <- bd_aux |>
     dplyr::full_join(registros, dplyr::join_by(vocero == usuario_num)) |>
-    dplyr::left_join(pl, dplyr::join_by(supervisor, vocero)) |>
+    # Inyección condicional de PL
+    (\(data) {
+      if (!is.null(pl)) {
+        dplyr::left_join(data, pl, dplyr::join_by(supervisor, vocero))
+      } else {
+        data
+      }
+    })() |>
     dplyr::distinct() |>
     dplyr::select(dplyr::any_of(names(bd_aux)), dplyr::everything())
 
   bd_prod_coord <- NULL
 
   if (isTRUE(include_coordinators)) {
-    # Universo de coordinadores (source of truth configurable)
+    # Universo de coordinadores
     if (coordinator_scope == "from_structure") {
       coord_base <- bd_aux |>
         dplyr::filter(!is.na(supervisor), supervisor != "-") |>
         dplyr::distinct(supervisor, .keep_all = TRUE)
     } else {
+      # Si llega aquí, está garantizado que 'pl' NO es NULL gracias a la validación inicial
       coord_ids <- pl |>
         dplyr::filter(!is.na(supervisor), supervisor != "-") |>
         dplyr::distinct(supervisor)
@@ -369,10 +384,17 @@ ensamblar_productividad <- function(
         dplyr::distinct(vocero, nombre_brigada, .keep_all = TRUE)
     }
 
-    # Métricas del coordinador: join por su num (supervisor)
+    # Métricas del coordinador: join por su num + pase (condicional)
     bd_prod_coord <- bd_prod_coord |>
       dplyr::left_join(registros, dplyr::join_by(supervisor == usuario_num)) |>
-      dplyr::left_join(pl, dplyr::join_by(supervisor, vocero)) |>
+      # Inyección condicional de PL
+      (\(data) {
+        if (!is.null(pl)) {
+          dplyr::left_join(data, pl, dplyr::join_by(supervisor, vocero))
+        } else {
+          data
+        }
+      })() |>
       dplyr::distinct()
   }
 
@@ -584,27 +606,33 @@ generar_reporte_productividad <- function(
   sheet_name = as.character(corte),
   header_fill = "#7030A0",
   char_default = "-",
-  num_default = 0
+  num_default = 0,
+  col_geo_actividad = "seccion"
 ) {
   missing_policy <- match.arg(missing_policy)
   coordinator_scope <- match.arg(coordinator_scope)
   coordinator_grain <- match.arg(coordinator_grain)
 
   # 1) Pase de lista (día)
-  pl <- preparar_pase_lista(
-    pl_main = pl_main,
-    pl_extra = pl_extra,
-    corte = corte,
-    allow_multiple_sources = allow_multiple_sources,
-    allow_multiple_per_day = allow_multiple_per_day,
-    missing_policy = missing_policy,
-    numeric_threshold = numeric_threshold
-  )
+  if (!is.null(pl_main)) {
+    pl <- preparar_pase_lista(
+      pl_main = pl_main,
+      pl_extra = pl_extra,
+      corte = corte,
+      allow_multiple_sources = allow_multiple_sources,
+      allow_multiple_per_day = allow_multiple_per_day,
+      missing_policy = missing_policy,
+      numeric_threshold = numeric_threshold
+    )
+  } else {
+    pl <- NULL
+  }
 
   # 2) Métricas actividad (día)
   registros <- resumir_actividad(
     actividad = actividad_dia,
-    missing_policy = missing_policy
+    missing_policy = missing_policy,
+    col_seccion = col_geo_actividad
   )
 
   # 3) Ensamble
@@ -621,8 +649,8 @@ generar_reporte_productividad <- function(
     bd_prod_raw,
     char_default = char_default,
     num_default = num_default
-  ) |> 
-    filter(nombre_coordinador != "-")
+  ) |>
+    filter(nombre_coordinador != "-" | dialogos_efectivos_nube > 0)
 
   list(
     corte = corte,
@@ -721,26 +749,35 @@ ft_resumen <- tabla_acumulada |>
     align(j = 3:5, align = "right", part = "all") |>
     border_inner(border = fp_border(color = "black", width = 1), part = "all") |>
     border_outer(border = fp_border(color = "black", width = 1), part = "all")
-  # --- 3. PROCESAMIENTO TABLA DETALLE (JA) ---
+  # --- 3. PROCESAMIENTO TABLA DETALLE (JA) BLINDADO ---
   ja <- bd_prod |>
     filter(!nombre_coordinador == nombre_vocero) |>
     filter(!is.na(nombre_coordinador) & nombre_coordinador != "-") |>
+    # Inyección defensiva: Garantizamos que la columna exista para el summarise
+    (\(data) {
+      if (!"numero_pases_lista" %in% names(data)) {
+        mutate(data, numero_pases_lista = 0)
+      } else {
+        data
+      }
+    })() |>
     mutate(
-      tiene_pase = numero_pases_lista > 0,
+      # Utilizamos la bandera robusta creada aguas arriba en postprocesar_output()
+      tiene_pase = tiene_pase_lista,
       estatus_individual = if_else(
         tiene_pase,
         paste0("✅ ", nombre_coordinador),
         paste0("❌ ", nombre_coordinador)
       )
     ) |>
-    arrange(desc(tiene_pase), nombre_coordinador) |> 
+    arrange(desc(tiene_pase), nombre_coordinador) |>
     group_by(nombre_coordinador) |>
     summarise(
       total_coord = n_distinct(nombre_coordinador),
       lista_estatus = paste(unique(estatus_individual), collapse = "\n"),
       total_pases_distrito = sum(numero_pases_lista, na.rm = TRUE),
       .groups = "drop"
-    ) 
+    )
 
   # --- 4. CREACIÓN FLEXTABLE DETALLE ---
   ft_detalle <- flextable(
@@ -766,5 +803,5 @@ ft_resumen <- tabla_acumulada |>
     line_spacing(space = 1.2, part = "body")
 
   # Retornar ambas tablas como una lista
-  return(list(resumen = ft_resumen, detalle = ft_detalle))
+  return(list(resumen = ft_resumen, detalle = ft_detalle, cruda = tabla_acumulada))
 }
