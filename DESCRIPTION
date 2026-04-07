@@ -20,6 +20,7 @@ Imports:
     ggfittext,
     ggplot2,
     ggrepel,
+    ggsflabel,
     ggthemes,
     glue,
     googledrive,
