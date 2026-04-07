@@ -20,7 +20,6 @@ Imports:
     ggfittext,
     ggplot2,
     ggrepel,
-    ggsflabel,
     ggthemes,
     glue,
     googledrive,
@@ -47,4 +46,6 @@ Suggests:
     RSQLite,
     testthat (>= 3.0.0),
     waldo
+Remotes:
+    yutannihilation/ggsflabel
 Config/testthat/edition: 3
