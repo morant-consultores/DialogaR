@@ -443,7 +443,8 @@ postprocesar_output <- function(bd_prod, char_default = "-", num_default = 0) {
 
   out |>
     ordenar_reporte() |>
-    dplyr::filter(vocero != "-")
+    dplyr::filter(vocero != "-") |>
+    dplyr::filter(is.na(status_vocero) | status_vocero)
 }
 
 
