@@ -1,6 +1,6 @@
 Package: DialogaR
 Title: What the Package Does (One Line, Title Case)
-Version: 0.0.0.9000
+Version: 0.1.0
 Authors@R: 
     person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
 Description: What the package does (one paragraph).
@@ -47,4 +47,6 @@ Suggests:
     RSQLite,
     testthat (>= 3.0.0),
     waldo
+Remotes:
+    yutannihilation/ggsflabel
 Config/testthat/edition: 3

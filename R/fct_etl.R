@@ -151,6 +151,7 @@ resolver_estructura_corte <- function(usuario_log, corte) {
     filter(fecha_evento <= as.Date(corte)) |>
     arrange(IdUsuario, IdHistorico) |>
     group_by(IdUsuario) |>
+    tidyr::fill(IdCargo, IdSupervisor, IdBrigada, .direction = "down") |>
     slice_tail(n = 1) |>
     ungroup() |>
     transmute(
@@ -214,6 +215,62 @@ cargar_pases_lista <- function(pool, ids_cuestionario, procesador_pl) {
     ~ procesador_pl(pool = pool, id_cuestionario = .x)
   ) |>
     rlang::set_names(paste0("pl_", ids_cuestionario))
+}
+
+#' Resolver brigada histórica al momento de cada registro de actividad
+#'
+#' @description
+#' Enriquece un dataframe de actividad con `id_brigada` resuelto **al momento
+#' de cada registro**, en lugar de usar la asignación actual del usuario.
+#'
+#' Para cada par `(usuario_num, fecha)` en `actividad`, busca en `usuario_log`
+#' la última asignación de brigada cuya `fecha_evento <= fecha` (LOCF). Esto
+#' permite trazar correctamente cuando un vocero trabajó en distintas brigadas
+#' en períodos diferentes.
+#'
+#' Si `actividad` ya contiene una columna `id_brigada`, es reemplazada.
+#'
+#' @param actividad Data frame con al menos las columnas `usuario_num` (character)
+#'   y `fecha` (Date).
+#' @param usuario_log Data frame producido por `cargar_usuario_log()`;
+#'   disponible en `insumos$cat$usuario_log`.
+#' @param usuarios_cat Data frame producido por `cargar_usuarios_cat()`;
+#'   disponible en `insumos$cat$usuarios`. Mapea `num` → `id_usuario`.
+#'
+#' @return `actividad` con la columna `id_brigada` (integer) resuelta
+#'   históricamente. Filas sin asignación conocida tendrán `NA`.
+#'
+#' @importFrom tidyr fill
+#' @export
+resolver_brigada_en_fecha <- function(actividad, usuario_log, usuarios_cat) {
+  num_map <- usuarios_cat |>
+    dplyr::select(id_usuario, num)
+
+  brigada_hist <- usuario_log |>
+    dplyr::arrange(IdUsuario, IdHistorico) |>
+    dplyr::group_by(IdUsuario) |>
+    tidyr::fill(IdBrigada, .direction = "down") |>
+    dplyr::group_by(IdUsuario, fecha_evento) |>
+    dplyr::slice_tail(n = 1) |>
+    dplyr::ungroup() |>
+    dplyr::transmute(
+      id_usuario  = IdUsuario,
+      fecha_evento,
+      id_brigada  = IdBrigada
+    ) |>
+    dplyr::inner_join(num_map, by = "id_usuario") |>
+    dplyr::select(num, fecha_evento, id_brigada)
+
+  actividad |>
+    dplyr::select(-dplyr::any_of("id_brigada")) |>
+    dplyr::left_join(
+      brigada_hist,
+      dplyr::join_by(
+        usuario_num == num,
+        dplyr::closest(fecha >= fecha_evento)
+      )
+    ) |>
+    dplyr::select(-fecha_evento)
 }
 
 # ---- 3) Orquestador Principal (Exportado) -------------------------------
