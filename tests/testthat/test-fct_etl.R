@@ -206,6 +206,192 @@ test_that("procesar_pase_lista parses JSON and returns expected columns", {
   expect_equal(as.character(result$usuario[[1]]), "12345")
 })
 
+# =========================================================================
+# TESTS: resolver_brigada_en_fecha
+# =========================================================================
+
+# Fixture helpers
+make_usuario_log <- function() {
+  dplyr::tibble(
+    IdHistorico   = c(10L, 20L, 30L, 40L),
+    IdUsuario     = c(1L,  1L,  1L,  2L),
+    IdCargo       = c(1L,  1L,  NA_integer_, 1L),
+    IdEstado      = c(1L,  1L,  1L,  1L),
+    IdMunicipio   = c(1L,  1L,  1L,  1L),
+    IdZonaDeTabajo = c(1L, 1L,  1L,  1L),
+    IdSupervisor  = c(99L, 99L, NA_integer_, 99L),
+    IdBrigada     = c(100L, 200L, NA_integer_, 300L),
+    FechaInsert   = as.POSIXct(c(
+      "2026-01-01 00:00:00",
+      "2026-02-15 00:00:00",
+      "2026-04-01 00:00:00",
+      "2026-01-01 00:00:00"
+    ), tz = "UTC"),
+    ts_evento     = as.POSIXct(c(
+      "2026-01-01 00:00:00",
+      "2026-02-15 00:00:00",
+      "2026-04-01 00:00:00",
+      "2026-01-01 00:00:00"
+    ), tz = "America/Mexico_City"),
+    fecha_evento  = as.Date(c(
+      "2026-01-01",
+      "2026-02-15",
+      "2026-04-01",
+      "2026-01-01"
+    ))
+  )
+}
+
+make_usuarios_cat <- function() {
+  dplyr::tibble(
+    id_usuario = c(1L, 2L),
+    num        = c("001", "002"),
+    cargo      = c("Vocero", "Vocero"),
+    status     = c(TRUE, TRUE),
+    municipio_usuario = c("Centro", "Centro"),
+    nombre_completo   = c("JUAN PEREZ", "CARLOS DIAZ"),
+    id_brigada        = c(200L, 300L)
+  )
+}
+
+test_that("resolver_brigada_en_fecha: resolves brigada from first assignment", {
+  actividad <- dplyr::tibble(
+    usuario_num = "001",
+    fecha       = as.Date("2026-01-20")
+  )
+
+  result <- resolver_brigada_en_fecha(actividad, make_usuario_log(), make_usuarios_cat())
+
+  expect_equal(nrow(result), 1L)
+  expect_equal(result$id_brigada, 100L)
+})
+
+test_that("resolver_brigada_en_fecha: resolves brigada after a brigade change", {
+  actividad <- dplyr::tibble(
+    usuario_num = "001",
+    fecha       = as.Date("2026-03-01")
+  )
+
+  result <- resolver_brigada_en_fecha(actividad, make_usuario_log(), make_usuarios_cat())
+
+  expect_equal(result$id_brigada, 200L)
+})
+
+test_that("resolver_brigada_en_fecha: fills forward through deactivation (NA brigada row)", {
+  # On 2026-04-01 the user has IdBrigada = NA (deactivated).
+  # Activity on 2026-04-05 should inherit the last known brigada (200).
+  actividad <- dplyr::tibble(
+    usuario_num = "001",
+    fecha       = as.Date("2026-04-05")
+  )
+
+  result <- resolver_brigada_en_fecha(actividad, make_usuario_log(), make_usuarios_cat())
+
+  expect_equal(result$id_brigada, 200L)
+})
+
+test_that("resolver_brigada_en_fecha: activity before first log entry returns NA", {
+  actividad <- dplyr::tibble(
+    usuario_num = "001",
+    fecha       = as.Date("2025-12-31")
+  )
+
+  result <- resolver_brigada_en_fecha(actividad, make_usuario_log(), make_usuarios_cat())
+
+  expect_equal(nrow(result), 1L)
+  expect_true(is.na(result$id_brigada))
+})
+
+test_that("resolver_brigada_en_fecha: handles multiple users independently", {
+  actividad <- dplyr::tibble(
+    usuario_num = c("001", "002"),
+    fecha       = as.Date(c("2026-02-01", "2026-02-01"))
+  )
+
+  result <- resolver_brigada_en_fecha(actividad, make_usuario_log(), make_usuarios_cat())
+
+  expect_equal(nrow(result), 2L)
+  expect_equal(result$id_brigada[result$usuario_num == "001"], 100L)
+  expect_equal(result$id_brigada[result$usuario_num == "002"], 300L)
+})
+
+test_that("resolver_brigada_en_fecha: replaces existing id_brigada column", {
+  actividad <- dplyr::tibble(
+    usuario_num = "001",
+    fecha       = as.Date("2026-02-01"),
+    id_brigada  = 999L  # stale value that should be overwritten
+  )
+
+  result <- resolver_brigada_en_fecha(actividad, make_usuario_log(), make_usuarios_cat())
+
+  expect_equal(result$id_brigada, 100L)
+})
+
+test_that("resolver_brigada_en_fecha: empty actividad returns empty data frame", {
+  actividad <- dplyr::tibble(
+    usuario_num = character(),
+    fecha       = as.Date(character())
+  )
+
+  result <- resolver_brigada_en_fecha(actividad, make_usuario_log(), make_usuarios_cat())
+
+  expect_equal(nrow(result), 0L)
+  expect_true("id_brigada" %in% names(result))
+})
+
+test_that("resolver_brigada_en_fecha: multiple log entries on same date do not duplicate activity rows", {
+  # Two log events on 2026-02-15 for the same user (e.g. status change + brigade
+  # change recorded on the same day). This is the exact scenario that caused row
+  # multiplication before the slice_tail(n=1) dedup was added.
+  log_same_day <- dplyr::tibble(
+    IdHistorico  = c(10L, 11L, 20L),
+    IdUsuario    = c(1L,  1L,  1L),
+    IdCargo      = c(1L,  1L,  1L),
+    IdEstado     = c(1L,  1L,  1L),
+    IdMunicipio  = c(1L,  1L,  1L),
+    IdZonaDeTabajo = c(1L, 1L, 1L),
+    IdSupervisor = c(99L, 99L, 99L),
+    IdBrigada    = c(100L, 150L, 200L),
+    FechaInsert  = as.POSIXct(c(
+      "2026-01-01 08:00:00",
+      "2026-01-01 09:00:00",  # same calendar date as row 1
+      "2026-02-15 00:00:00"
+    ), tz = "UTC"),
+    ts_evento    = as.POSIXct(c(
+      "2026-01-01 08:00:00",
+      "2026-01-01 09:00:00",
+      "2026-02-15 00:00:00"
+    ), tz = "America/Mexico_City"),
+    fecha_evento = as.Date(c("2026-01-01", "2026-01-01", "2026-02-15"))
+  )
+
+  actividad <- dplyr::tibble(
+    usuario_num = c("001", "001", "001"),
+    fecha       = as.Date(c("2026-01-15", "2026-01-15", "2026-03-01"))
+  )
+
+  result <- resolver_brigada_en_fecha(actividad, log_same_day, make_usuarios_cat())
+
+  # Must not expand: output rows == input rows
+  expect_equal(nrow(result), nrow(actividad))
+  # On 2026-01-15: last entry on 2026-01-01 is IdHistorico=11 → IdBrigada=150
+  expect_equal(result$id_brigada[result$fecha == as.Date("2026-01-15")], c(150L, 150L))
+  # On 2026-03-01: last entry overall is IdHistorico=20 → IdBrigada=200
+  expect_equal(result$id_brigada[result$fecha == as.Date("2026-03-01")], 200L)
+})
+
+test_that("resolver_brigada_en_fecha: output row count always equals input row count", {
+  # Property-style check: regardless of log density, nrow(result) == nrow(actividad)
+  actividad <- dplyr::tibble(
+    usuario_num = rep(c("001", "002"), each = 5),
+    fecha       = rep(seq(as.Date("2026-01-01"), by = "month", length.out = 5), 2)
+  )
+
+  result <- resolver_brigada_en_fecha(actividad, make_usuario_log(), make_usuarios_cat())
+
+  expect_equal(nrow(result), nrow(actividad))
+})
+
 test_that("procesar_pase_lista skips records with invalid JSON", {
   registros_mock <- tibble::tibble(
     Id = c(1L, 2L),
