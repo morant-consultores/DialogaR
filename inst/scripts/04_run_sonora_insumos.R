@@ -16,6 +16,7 @@ library(DialogaR)
 library(dplyr)
 library(lubridate)
 library(googledrive)
+library(sf)
 
 # =========================================================================
 # 1. PARÁMETROS
@@ -77,7 +78,9 @@ need <- c(
 
 missing_files <- setdiff(need, files_tbl$name)
 if (length(missing_files) > 0) {
-  cli::cli_abort("Faltan archivos en Drive: {paste(missing_files, collapse=', ')}")
+  cli::cli_abort(
+    "Faltan archivos en Drive: {paste(missing_files, collapse=', ')}"
+  )
 }
 
 dups <- files_tbl |>
@@ -106,12 +109,17 @@ for (i in seq_len(nrow(need_tbl))) {
 metas <- readxl::read_xlsx(
   need_tbl$local_path[need_tbl$name == "secciones_ds.xlsx"],
   sheet = "Equipo 1"
-) |> janitor::clean_names()
+) |>
+  janitor::clean_names()
 
-sonora    <- readr::read_rds(need_tbl$local_path[need_tbl$name == "sonora.rda"])
-rango_edad <- readr::read_rds(need_tbl$local_path[need_tbl$name == "rango_edad.rds"])
-shp_mun   <- readr::read_rds(need_tbl$local_path[need_tbl$name == "shp_mun.rda"])
-pptx      <- officer::read_pptx(need_tbl$local_path[need_tbl$name == "Plantilla_MORANT.pptx"])
+sonora <- readr::read_rds(need_tbl$local_path[need_tbl$name == "sonora.rda"])
+rango_edad <- readr::read_rds(need_tbl$local_path[
+  need_tbl$name == "rango_edad.rds"
+])
+shp_mun <- readr::read_rds(need_tbl$local_path[need_tbl$name == "shp_mun.rda"])
+pptx <- officer::read_pptx(need_tbl$local_path[
+  need_tbl$name == "Plantilla_MORANT.pptx"
+])
 
 # Geometría de secciones filtrada a Hermosillo
 shp_secc <- sonora$info$shp$seccion |>
@@ -123,7 +131,10 @@ shp_secc <- sonora$info$shp$seccion |>
 
 # Tabla de zonas auxiliares para cruce geográfico
 aux_zonas <- dplyr::as_tibble(shp_secc) |>
-  dplyr::left_join(dplyr::as_tibble(shp_mun), by = dplyr::join_by(municipio_24)) |>
+  dplyr::left_join(
+    dplyr::as_tibble(shp_mun),
+    by = dplyr::join_by(municipio_24)
+  ) |>
   dplyr::transmute(
     seccion = stringr::str_replace(seccion, "08_", "")
   )
@@ -178,11 +189,15 @@ cli::cli_h1("Construyendo objetos de análisis")
 bd_completa <- insumos$bd_actividad |>
   dplyr::left_join(aux_zonas, by = "seccion") |>
   dplyr::filter(desglose != "ERROR", fecha >= fecha_min_actividad) |>
-  parches_bd()
+  parches_bd() |>
+  resolver_brigada_en_fecha(
+    usuario_log = insumos$cat$usuario_log,
+    usuarios_cat = insumos$cat$usuarios
+  )
 
 bd_aux <- insumos$bd_aux
 brigadas <- insumos$cat$brigadas
-voceros  <- insumos$cat$usuarios
+voceros <- insumos$cat$usuarios
 
 coordinadores <- bd_aux |>
   dplyr::filter(!is.na(supervisor), supervisor != "-") |>
@@ -224,7 +239,9 @@ validar <- function(
       ok <- FALSE
     }
   }
-  if (ok) cli::cli_alert_success("{nombre}: OK ({nrow(objeto)} filas)")
+  if (ok) {
+    cli::cli_alert_success("{nombre}: OK ({nrow(objeto)} filas)")
+  }
   invisible(ok)
 }
 
@@ -232,8 +249,25 @@ validar(
   "bd_completa",
   bd_completa,
   nrow_min = 1L,
-  cols_requeridas = c("fecha", "usuario_num", "desglose", "duracion_minutos")
+  cols_requeridas = c(
+    "fecha",
+    "usuario_num",
+    "desglose",
+    "duracion_minutos",
+    "id_brigada"
+  )
 )
+
+n_sin_brigada <- sum(is.na(bd_completa$id_brigada))
+if (n_sin_brigada > 0) {
+  cli::cli_alert_warning(
+    "bd_completa: {n_sin_brigada} registro(s) sin id_brigada resuelto (actividad anterior al primer evento de log)"
+  )
+} else {
+  cli::cli_alert_success(
+    "bd_completa: id_brigada resuelto en todos los registros"
+  )
+}
 
 validar(
   "bd_aux",
@@ -248,10 +282,14 @@ validar(
   )
 )
 
-validar("voceros",       voceros,       nrow_min = 1L)
-validar("coordinadores", coordinadores, nrow_min = 1L,
-        cols_requeridas = c("supervisor", "nombre_coordinador"))
-validar("metas",         metas,         nrow_min = 1L)
+validar("voceros", voceros, nrow_min = 1L)
+validar(
+  "coordinadores",
+  coordinadores,
+  nrow_min = 1L,
+  cols_requeridas = c("supervisor", "nombre_coordinador")
+)
+validar("metas", metas, nrow_min = 1L)
 
 pl_287 <- insumos$pase_lista$pl_287
 if (is.null(pl_287) || nrow(pl_287) == 0) {
