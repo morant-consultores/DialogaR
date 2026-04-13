@@ -185,6 +185,24 @@ generar_reporte_brigadas <- function(
       .by = c(usuario_num, fecha)
     )
 
+  # Integridad: voceros con actividad que no están en el catálogo → sus registros
+  # se perderían en el left join de procesar_metricas (bd_aux es la tabla izquierda).
+  voceros_sin_catalogo <- dplyr::setdiff(
+    unique(stats_base$usuario_num),
+    unique(bd_aux$vocero)
+  )
+  if (length(voceros_sin_catalogo) > 0) {
+    n_perdidos <- stats_base |>
+      dplyr::filter(usuario_num %in% voceros_sin_catalogo) |>
+      dplyr::summarise(total = sum(n, na.rm = TRUE)) |>
+      dplyr::pull(total)
+    cli::cli_alert_danger(
+      "Integridad comprometida: {length(voceros_sin_catalogo)} vocero(s) con {n_perdidos} registro(s) efectivos no figuran en el cat\u00e1logo administrativo y ser\u00e1n excluidos del reporte: {paste(voceros_sin_catalogo, collapse = ', ')}"
+    )
+  }
+
+  n_total_esperado <- sum(stats_base$n, na.rm = TRUE)
+
   reg_final <- procesar_metricas(stats_base, "n")
 
   # 5. Formateo de Tabla Principal (Pivot Wider) ----
@@ -290,6 +308,19 @@ generar_reporte_brigadas <- function(
     cli::cli_alert_warning(
       "Alerta de Calidad de Datos: Se detectaron {huerfanos} registros asociados a brigadistas sin coordinador (SIN ASIGNAR)."
     )
+  }
+
+  # Verificación de integridad: el Total consolidado debe igualar la suma de stats_base
+  n_total_real <- sum(
+    resultado_final[, as.character(rango_fechas), drop = FALSE],
+    na.rm = TRUE
+  )
+  if (n_total_real != n_total_esperado) {
+    cli::cli_alert_danger(
+      "Integridad comprometida: se esperaban {n_total_esperado} registros efectivos pero el reporte contiene {n_total_real}. Diferencia: {n_total_real - n_total_esperado}."
+    )
+  } else {
+    cli::cli_alert_success("Integridad OK: {n_total_real} registros efectivos consolidados.")
   }
 
   list(
