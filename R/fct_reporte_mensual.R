@@ -95,6 +95,7 @@ generar_reporte_brigadas <- function(
     dplyr::distinct(IdUsuario, .keep_all = TRUE) |>
     dplyr::transmute(IdUsuario, fecha_alta = as.Date(FechaInsert)) |>
     dplyr::left_join(bajas, by = "IdUsuario") |>
+    dplyr::distinct(usuario, .keep_all = TRUE) |>
     dplyr::select(-IdUsuario)
 
   # --- Manejo de Huérfanos Operativos ---
@@ -105,6 +106,14 @@ generar_reporte_brigadas <- function(
       supervisor = tidyr::replace_na(supervisor, "SIN ASIGNAR"),
       nombre_brigada = tidyr::replace_na(nombre_brigada, "SIN ASIGNAR")
     )
+
+  # --- Deduplicación por cambios de coordinador ---
+  # Un vocero puede aparecer en múltiples filas por cambios históricos de coordinador.
+  # Se conserva únicamente el coordinador activo (status_coord = TRUE); si no hay ninguno
+  # activo, se toma la primera fila disponible.
+  bd_aux <- bd_aux |>
+    dplyr::arrange(dplyr::desc(status_coord)) |>
+    dplyr::distinct(vocero, .keep_all = TRUE)
 
   # 3. Función interna para procesar métricas ----
   procesar_metricas <- function(df_stats, nombre_col_valor) {
@@ -122,11 +131,18 @@ generar_reporte_brigadas <- function(
         supervisor,
         status_coord,
         nombre_vocero = nombre_coordinador,
-        vocero = supervisor
+        vocero = supervisor,
+        status_vocero
       ) |>
       dplyr::arrange(dplyr::desc(nombre_brigada)) |>
       dplyr::distinct(distrito, nombre_coordinador, .keep_all = TRUE) |>
       dplyr::left_join(df_stats, by = dplyr::join_by(supervisor == usuario_num))
+
+    # Excluir de reg_voc a los coordinadores que ya tienen fila propia en reg_sup
+    # (evita que aparezcan dos veces con distinto nombre_coordinador)
+    supervisores <- unique(reg_sup$vocero[!is.na(reg_sup$vocero)])
+    reg_voc <- reg_voc |>
+      dplyr::filter(!vocero %in% supervisores)
 
     # Combinar y completar fechas
     dplyr::bind_rows(reg_sup, reg_voc) |>
@@ -134,6 +150,7 @@ generar_reporte_brigadas <- function(
       tidyr::complete(
         tidyr::nesting(
           municipio,
+          distrito,
           nombre_brigada,
           nombre_coordinador,
           supervisor,
