@@ -27,7 +27,7 @@ coordinadores y brigadas. Debe contener las columnas \code{vocero},
 Data frame con una fila por combinación de agrupación, columnas en
 mayúsculas con espacios, que incluye viviendas visitadas, días trabajados,
 diálogos efectivos, meta, fecha de corte y avance de meta (proporción
-numérica; \code{NA} cuando no existe meta).
+numérica; \code{0} cuando la sección no tiene meta asignada o la meta es cero).
 }
 \description{
 Agrega la actividad de campo por sección geográfica y la cruza con las metas
