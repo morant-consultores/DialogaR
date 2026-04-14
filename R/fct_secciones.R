@@ -88,11 +88,9 @@ meta_usuario_condicional <- function(
     ) |>
     dplyr::mutate(
       fecha_corte = corte,
-      # ISO Business Rule: NA if no meta exists, do not fake 100% compliance.
-      # We also keep 'avance_meta' as a pure numeric value (no scales::percent).
       avance_meta = dplyr::if_else(
         is.na(meta) | meta == 0,
-        NA_real_,
+        0,
         diálogos_efectivos / meta
       )
     ) |>
