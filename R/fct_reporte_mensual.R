@@ -117,8 +117,10 @@ generar_reporte_brigadas <- function(
 
   # 3. Función interna para procesar métricas ----
   procesar_metricas <- function(df_stats, nombre_col_valor) {
-    # Unir Voceros
+    # Unir Voceros (se excluyen filas sin vocero asignado: nunca tienen actividad
+    # y generarían filas fantasma de cero tras tidyr::complete)
     reg_voc <- bd_aux |>
+      dplyr::filter(!is.na(vocero)) |>
       dplyr::left_join(df_stats, by = dplyr::join_by(vocero == usuario_num))
 
     # Unir Supervisores
