@@ -37,6 +37,7 @@ Imports:
     rlang,
     scales,
     sf,
+    stringi,
     stringr,
     tibble,
     tidyr,
