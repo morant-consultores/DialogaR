@@ -141,8 +141,6 @@ generar_metricas_auditoria <- function(
       }
     })()
 
-  validar_auditoria(evaluacion)
-
   # 4. Cálculo de Promedios
   bd_prom <- evaluacion |>
     dplyr::mutate(

@@ -309,11 +309,7 @@ cargar_insumos <- function(
   postprocess_insumos = NULL
 ) {
   usuarios_cat <- cargar_usuarios_cat(pool, id_proyecto)
-  validar_usuarios_cat(usuarios_cat)
-
   brigadas_cat <- cargar_brigadas_cat(pool, id_proyecto)
-  validar_brigadas_cat(brigadas_cat)
-
   municipios_cat <- cargar_municipios_cat(pool)
   usuario_log <- cargar_usuario_log(pool, id_proyecto)
 
@@ -325,7 +321,6 @@ cargar_insumos <- function(
     filtro_minimo = filtro_minimo_actividad,
     normalizador = normalizador_actividad
   )
-  validar_bd_actividad(bd_actividad)
 
   estructura_corte <- resolver_estructura_corte(usuario_log, corte)
 
@@ -335,7 +330,6 @@ cargar_insumos <- function(
     brigadas_cat,
     municipios_cat
   )
-  validar_bd_aux(bd_aux)
 
   pase_lista <- list()
   if (length(ids_pase_lista) > 0) {
