@@ -726,6 +726,7 @@ generar_reporte_productividad <- function(
 
 
 
+#' @export
 generar_tablas_reporte <- function(bd_prod) {
   # --- 1. PROCESAMIENTO TABLA ACUMULADA (RESUMEN) ---
   nombres <- bd_prod |> 
