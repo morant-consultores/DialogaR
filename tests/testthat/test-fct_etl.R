@@ -59,6 +59,8 @@ setup_etl_db <- function() {
     seccion = "0001",
     desglose = "Efectivo",
     duracion_minutos = 10,
+    fecha_inicio = "2026-03-20 09:00:00",
+    fecha_fin = "2026-03-20 09:10:00",
     origen = "Actividad",
     stringsAsFactors = FALSE
   ))
@@ -76,7 +78,7 @@ test_that("cargar_insumos returns list with expected structure", {
 
   fuentes <- list(list(
     tabla = "Actividad",
-    select_cols = c("fecha", "usuario_num", "seccion", "desglose", "duracion_minutos"),
+    select_cols = c("fecha", "usuario_num", "seccion", "desglose", "duracion_minutos", "fecha_inicio", "fecha_fin"),
     origen = "Actividad"
   ))
 
@@ -102,7 +104,7 @@ test_that("cargar_insumos applies postprocess_insumos hook", {
 
   fuentes <- list(list(
     tabla = "Actividad",
-    select_cols = c("fecha", "usuario_num", "seccion", "desglose", "duracion_minutos"),
+    select_cols = c("fecha", "usuario_num", "seccion", "desglose", "duracion_minutos", "fecha_inicio", "fecha_fin"),
     origen = "Actividad"
   ))
 
@@ -131,7 +133,7 @@ test_that("cargar_insumos aborts when ids_pase_lista provided without procesador
 
   fuentes <- list(list(
     tabla = "Actividad",
-    select_cols = c("fecha", "usuario_num", "seccion", "desglose", "duracion_minutos"),
+    select_cols = c("fecha", "usuario_num", "seccion", "desglose", "duracion_minutos", "fecha_inicio", "fecha_fin"),
     origen = "Actividad"
   ))
 

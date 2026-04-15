@@ -191,6 +191,8 @@ construir_base_contactos <- function(
     ) |>
     dplyr::filter(correo != na_chr | celular != na_chr)
 
+  validar_base_contactos(res, na_chr = na_chr)
+
   # ------------------------------------------------------------
   # Clasificación estratégica (opcional)
   # ------------------------------------------------------------
