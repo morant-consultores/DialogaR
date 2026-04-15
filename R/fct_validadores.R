@@ -110,16 +110,16 @@ validar_brigadas_cat <- function(df) {
     prefijos <- substr(nombres_validos, 1, 2)
     invalidos <- unique(prefijos[is.na(suppressWarnings(as.integer(prefijos)))])
     if (length(invalidos) > 0) {
-      rlang::abort(
+      rlang::warn(
         c(
           paste0(
             length(invalidos),
             " brigada(s) con código de distrito no numérico en los primeros 2 caracteres"
           ),
           i = paste("Prefijos inválidos:", paste(utils::head(invalidos, 10), collapse = ", ")),
-          i = "Se esperan prefijos numéricos como '06', '07', etc."
+          i = "Si este proyecto no usa códigos numéricos de distrito, este aviso puede ignorarse."
         ),
-        class = "error_contrato_brigadas"
+        class = "warn_contrato_brigadas"
       )
     }
   }
