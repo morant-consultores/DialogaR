@@ -441,10 +441,70 @@ postprocesar_output <- function(bd_prod, char_default = "-", num_default = 0) {
       dplyr::mutate(tiene_actividad = FALSE)
   }
 
-  out |>
+  out_ordenado <- out |>
     ordenar_reporte() |>
     dplyr::filter(vocero != "-") |>
     dplyr::filter(is.na(status_vocero) | status_vocero)
+
+  # Detectar voceros activos con coordinador inactivo antes de filtrarlos
+  excluidos_coord <- out_ordenado |>
+    dplyr::filter(!is.na(status_coord) & !status_coord)
+
+  if (nrow(excluidos_coord) > 0) {
+    tiene_actividad_col <- "viviendas_visitadas_nube" %in% names(excluidos_coord)
+
+    con_datos <- if (tiene_actividad_col) {
+      excluidos_coord |> dplyr::filter(viviendas_visitadas_nube > 0)
+    } else {
+      excluidos_coord[0, ]
+    }
+
+    sin_datos <- if (tiene_actividad_col) {
+      excluidos_coord |> dplyr::filter(viviendas_visitadas_nube == 0)
+    } else {
+      excluidos_coord
+    }
+
+    if (nrow(con_datos) > 0) {
+      detalle <- paste(
+        apply(con_datos, 1, function(r) {
+          viviendas <- if (tiene_actividad_col) r[["viviendas_visitadas_nube"]] else "?"
+          efectivos  <- if ("dialogos_efectivos_nube" %in% names(con_datos)) r[["dialogos_efectivos_nube"]] else "?"
+          sprintf(
+            "  - Vocero %s (%s) | Coord. inactivo: %s | Viviendas: %s | Efectivos: %s",
+            r[["vocero"]], r[["nombre_vocero"]], r[["nombre_coordinador"]],
+            viviendas, efectivos
+          )
+        }),
+        collapse = "\n"
+      )
+      cli::cli_abort(c(
+        "x" = "{nrow(con_datos)} vocero(s) activo(s) tienen registros de actividad pero su coordinador está inactivo.",
+        "!" = "El reporte fue detenido para evitar pérdida silenciosa de datos.",
+        " " = "Corrige el estado del coordinador en la base de datos antes de continuar.",
+        " " = detalle
+      ), class = "error_coord_inactivo_con_datos")
+    }
+
+    if (nrow(sin_datos) > 0) {
+      detalle_sin <- paste(
+        apply(sin_datos, 1, function(r) {
+          sprintf(
+            "  - Vocero %s (%s) | Coord. inactivo: %s",
+            r[["vocero"]], r[["nombre_vocero"]], r[["nombre_coordinador"]]
+          )
+        }),
+        collapse = "\n"
+      )
+      cli::cli_warn(c(
+        "i" = "{nrow(sin_datos)} vocero(s) activo(s) excluido(s) del reporte por tener coordinador inactivo (sin actividad registrada).",
+        " " = detalle_sin
+      ))
+    }
+  }
+
+  out_ordenado |>
+    dplyr::filter(is.na(status_coord) | status_coord)
 }
 
 
