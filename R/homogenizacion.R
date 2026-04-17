@@ -35,10 +35,15 @@ cargar_actividad <- function(
       mutate(
         fecha = as.Date(fecha),
         usuario_num = as.character(usuario_num),
-        # padding robusto: 1) número -> 2) 4 dígitos
-        seccion = as.character(seccion),
         origen_datos = dplyr::coalesce(f$origen, f$tabla)
       )
+
+    # Coerción de columna geográfica: solo si existe.
+    # Proyectos con sección (e.g. Lorenia) tienen `seccion`;
+    # proyectos con AGEB (e.g. GM) no la tienen y no deben fallar aquí.
+    if ("seccion" %in% names(df)) {
+      df <- df |> mutate(seccion = as.character(seccion))
+    }
 
     # 4) Normalizador por fuente (R)
     if (!is.null(normalizador)) {
@@ -49,17 +54,10 @@ cargar_actividad <- function(
   })
 }
 
-filtro_minimo_actividad <- function(q, f) {
-  # Siempre filtras seccion no NA (todas las tablas)
-  q <- q |> filter(!is.na(seccion))
-
-  # En todas menos Juárez requieres puerta no NA (según tu lógica)
-  if (isTRUE(f$requiere_puerta)) {
-    q <- q |> filter(!is.na(puerta))
-  }
-
-  q
-}
+# NOTA: filtro_minimo_actividad fue eliminado de este módulo.
+# Cada proyecto debe inyectar su propio filtro vía el parámetro
+# `filtro_minimo_actividad` de cargar_insumos(). No existe columna
+# geográfica universal: Lorenia usa `seccion`, GM usa `ageb`.
 
 normalizador_actividad <- function(df, f) {
   # Municipios fijos para CHIH y JUAREZ
