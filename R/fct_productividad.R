@@ -727,6 +727,20 @@ generar_reporte_productividad <- function(
 
 
 
+#' Generar tablas de resumen para el reporte de productividad
+#'
+#' @param bd_prod Data frame producido por \code{generar_reporte_productividad()},
+#'   con columnas \code{nombre_brigada} y métricas de actividad por vocero.
+#'
+#' @return Lista de tablas (flextable / data frame) listas para insertar en la
+#'   presentación PPTX.
+#'
+#' @section Seguridad y Privacidad:
+#' Nivel de datos: INTERNO (métricas agregadas por brigada y coordinador).
+#' No contiene PII de encuestados. Los nombres de coordinador son datos
+#' operativos internos. Control ISO 27001: A.8.2 (Clasificación de información).
+#'
+#' @export
 generar_tablas_reporte <- function(bd_prod) {
   # --- 1. PROCESAMIENTO TABLA ACUMULADA (RESUMEN) ---
   nombres <- bd_prod |> 
@@ -756,8 +770,29 @@ generar_tablas_reporte <- function(bd_prod) {
       usuarios = sum(dialogos_efectivos_nube > 0, na.rm = TRUE),
       dialogos = sum(dialogos_efectivos_nube, na.rm = TRUE),
       .groups = "drop"
-    ) |>
-    mutate(promedio = round(dialogos / if_else(usuarios == 0, NA_real_, usuarios), 2))
+    )
+
+  brigadas_huerfanas <- por_brigada |>
+    filter(usuarios == 0, dialogos > 0)
+
+  if (nrow(brigadas_huerfanas) > 0) {
+    detalle <- paste(
+      sprintf("  - %s: %d diálogo(s)", brigadas_huerfanas$nombre, brigadas_huerfanas$dialogos),
+      collapse = "\n"
+    )
+    stop(sprintf(
+      paste0(
+        "generar_tablas_reporte: %d brigada(s) tienen diálogos registrados pero ningún",
+        " usuario con actividad. Esto indica una inconsistencia entre bd_prod y la",
+        " estructura operativa. Brigadas afectadas:\n%s"
+      ),
+      nrow(brigadas_huerfanas), detalle
+    ))
+  }
+
+  por_brigada <- por_brigada |>
+    filter(usuarios > 0) |>
+    mutate(promedio = round(dialogos / usuarios, 2))
 
   tabla_acumulada <- bind_rows(
     general     |> mutate(.ord0 = 0, .ord2 = 0),
