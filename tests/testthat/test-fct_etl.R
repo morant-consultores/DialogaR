@@ -392,6 +392,124 @@ test_that("resolver_brigada_en_fecha: output row count always equals input row c
   expect_equal(nrow(result), nrow(actividad))
 })
 
+# =========================================================================
+# TESTS: construir_bd_aux — validación relación coordinador–brigada
+# =========================================================================
+
+make_ec <- function(id_brigada_vocero, id_brigada_coord) {
+  dplyr::tibble(
+    id_usuario   = c(1L, 2L),
+    id_cargo     = c(1L, 2L),
+    id_estado    = c(1L, 1L),
+    id_municipio = c(1L, 1L),
+    id_zona      = c(1L, 1L),
+    id_supervisor = c(2L, NA_integer_),
+    id_brigada   = c(id_brigada_vocero, id_brigada_coord),
+    ts_evento    = as.POSIXct(c("2026-01-15", "2026-01-15"), tz = "UTC"),
+    fecha_evento = as.Date(c("2026-01-15", "2026-01-15"))
+  )
+}
+
+ucat_bd <- dplyr::tibble(
+  id_usuario       = c(1L, 2L),
+  num              = c("001", "002"),
+  cargo            = c("Vocero", "Coordinador de Brigada"),
+  status           = c(TRUE, TRUE),
+  municipio_usuario = c("Centro", "Centro"),
+  nombre_completo  = c("JUAN PEREZ", "CARLOS SOTO"),
+  id_brigada       = c(100L, 200L)
+)
+
+bcat_bd <- dplyr::tibble(
+  id_brigada            = c(100L, 200L),
+  nombre_brigada        = c("BRIGADA NORTE", "BRIGADA SUR"),
+  activo_brigada        = c(TRUE, TRUE),
+  id_zona_trabajo_brigada = c(1L, 1L),
+  id_usuario_brigada    = c(2L, NA_integer_)
+)
+
+mcat_bd <- dplyr::tibble(id_municipio = 1L, municipio_log = "Centro")
+
+test_that("construir_bd_aux: brigadas coincidentes no generan advertencia ni excluyen filas", {
+  ec <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 100L)
+  expect_no_warning(
+    result <- construir_bd_aux(ec, ucat_bd, bcat_bd, mcat_bd)
+  )
+  expect_equal(nrow(result), 2L)
+})
+
+test_that("construir_bd_aux: brigadas distintas emiten advertencia con 'espuria'", {
+  ec <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 200L)
+  expect_warning(
+    construir_bd_aux(ec, ucat_bd, bcat_bd, mcat_bd),
+    regexp = "espuria"
+  )
+})
+
+test_that("construir_bd_aux: relación espuria emite alerta pero conserva todas las filas", {
+  ec <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 200L)
+  result <- suppressWarnings(
+    construir_bd_aux(ec, ucat_bd, bcat_bd, mcat_bd)
+  )
+  # La alerta se emite pero no se excluye ningún vocero: perder filas de bd_aux
+  # significa perder actividad operativa en todos los reportes posteriores.
+  expect_equal(nrow(result), 2L)
+})
+
+test_that("construir_bd_aux: la advertencia menciona el num del coordinador y las brigadas implicadas", {
+  ec <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 200L)
+  w <- tryCatch(
+    withCallingHandlers(
+      construir_bd_aux(ec, ucat_bd, bcat_bd, mcat_bd),
+      warning = function(w) { invokeRestart("muffleWarning") }
+    ),
+    warning = identity
+  )
+  # Capturar el mensaje de advertencia para inspeccionarlo
+  msgs <- tryCatch(
+    withCallingHandlers(
+      construir_bd_aux(ec, ucat_bd, bcat_bd, mcat_bd),
+      warning = function(w) {
+        msg <<- conditionMessage(w)
+        invokeRestart("muffleWarning")
+      }
+    )
+  )
+  # El mensaje debe incluir el num del coordinador y al menos una brigada
+  expect_match(msg, "002|BRIGADA", ignore.case = TRUE)
+})
+
+test_that("construir_bd_aux: espuria sin vocero real (slot vacío) es eliminada", {
+  # Escenario: coordinador "002" aparece como supervisor de brigada 100 (ajena),
+  # pero el id_usuario de ese slot (id=3) no existe en usuarios_cat → vocero=NA.
+  # Esa fila debe eliminarse: no protege actividad y puede duplicar al coordinador.
+  ec_vacio <- dplyr::tibble(
+    id_usuario    = c(3L, 2L),         # 3 no existe en ucat_bd
+    id_cargo      = c(1L, 2L),
+    id_estado     = c(1L, 1L),
+    id_municipio  = c(1L, 1L),
+    id_zona       = c(1L, 1L),
+    id_supervisor = c(2L, NA_integer_),
+    id_brigada    = c(100L, 200L),     # espuria: 100 ≠ 200
+    ts_evento     = as.POSIXct(c("2026-01-15", "2026-01-15"), tz = "UTC"),
+    fecha_evento  = as.Date(c("2026-01-15", "2026-01-15"))
+  )
+  result <- suppressWarnings(construir_bd_aux(ec_vacio, ucat_bd, bcat_bd, mcat_bd))
+  # Solo debe quedar la fila del coordinador en su brigada real; el slot vacío espurio se elimina
+  expect_equal(nrow(result), 1L)
+  expect_equal(result$vocero[[1]], "002")
+  expect_equal(result$nombre_brigada[[1]], "BRIGADA SUR")
+})
+
+test_that("construir_bd_aux: espuria CON vocero real conserva la fila del vocero", {
+  # Contraste: si el slot espurio SÍ tiene un vocero real (id_usuario existe en ucat_bd),
+  # la fila se conserva para no perder su actividad operativa.
+  ec_con_vocero <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 200L)
+  result <- suppressWarnings(construir_bd_aux(ec_con_vocero, ucat_bd, bcat_bd, mcat_bd))
+  expect_equal(nrow(result), 2L)
+  expect_true("001" %in% result$vocero)
+})
+
 test_that("procesar_pase_lista skips records with invalid JSON", {
   registros_mock <- tibble::tibble(
     Id = c(1L, 2L),
