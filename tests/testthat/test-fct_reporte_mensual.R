@@ -30,7 +30,7 @@ make_bd_aux_m <- function() {
   )
 }
 
-make_insumos_cat <- function() {
+make_insumos_cat <- function(coord_nums = character()) {
   list(
     cat = list(
       usuario_log = tibble::tibble(
@@ -43,6 +43,11 @@ make_insumos_cat <- function() {
         IdSupervisor   = 2L,
         IdBrigada      = 100L,
         FechaInsert    = "2026-01-15 00:00:00"
+      ),
+      usuarios = tibble::tibble(
+        num    = coord_nums,
+        cargo  = rep("Coordinador de Brigada", length(coord_nums)),
+        status = rep(TRUE, length(coord_nums))
       )
     )
   )
@@ -191,6 +196,46 @@ test_that("generar_reporte_brigadas imputes SIN ASIGNAR for voceros with no coor
   )
 })
 
+test_that("vocero dado de baja durante el periodo aparece en el reporte con su actividad", {
+  corte     <- as.Date("2026-03-25")
+  fecha_ini <- as.Date("2026-03-23")
+  fechas    <- seq.Date(fecha_ini, corte, by = "day")
+
+  # "001" trabajó los primeros 2 días y fue dado de baja antes del corte
+  bd_completa <- make_bd_completa_multi(
+    fechas       = fechas[1:2],
+    usuario_nums = rep("001", 2)
+  )
+
+  bd_aux <- make_bd_aux_rows(
+    voceros      = "001",
+    supervisores = "002",
+    status_coord = TRUE,
+    status_vocero = FALSE   # dado de baja
+  )
+
+  testthat::local_mocked_bindings(
+    tbl = function(src, ...) mock_usuarios_tibble(),
+    .package = "dplyr"
+  )
+
+  resultado <- suppressWarnings(generar_reporte_brigadas(
+    reporte     = "semanal",
+    corte       = corte,
+    id_proyecto = 10L,
+    pool        = NULL,
+    bd_completa = bd_completa,
+    bd_aux      = bd_aux,
+    insumos     = make_insumos_cat(),
+    week_start  = 1L
+  ))
+
+  fila <- dplyr::filter(resultado$registros, vocero == "001")
+  expect_equal(nrow(fila), 1L)
+  expect_equal(fila$Total, 2L)
+  expect_equal(sum(resultado$registros$Total, na.rm = TRUE), 2L)
+})
+
 # =========================================================================
 # TESTS: integridad de registros
 # =========================================================================
@@ -297,12 +342,12 @@ test_that("cada vocero aparece exactamente una vez cuando bd_aux tiene filas dup
   expect_equal(sum(resultado$registros$Total, na.rm = TRUE), 3L)
 })
 
-test_that("un coordinador que también es vocero aparece exactamente una vez en el reporte", {
+test_that("un coordinador (por cargo) que también es vocero aparece exactamente una vez en el reporte", {
   corte     <- as.Date("2026-03-25")
   fecha_ini <- as.Date("2026-03-23")
   fechas    <- seq.Date(fecha_ini, corte, by = "day")
 
-  # Vocero "001" es además el supervisor de "002"
+  # "001" tiene Cargo = "Coordinador de Brigada" y también tiene actividad propia
   bd_completa <- make_bd_completa_multi(
     fechas       = c(fechas[1], fechas[2], fechas[1]),
     usuario_nums = c("001", "001", "002")
@@ -310,7 +355,7 @@ test_that("un coordinador que también es vocero aparece exactamente una vez en 
 
   bd_aux <- make_bd_aux_rows(
     voceros      = c("001", "002"),
-    supervisores = c("001", "001"),   # "001" se coordina a sí mismo y a "002"
+    supervisores = c("001", "001"),
     status_coord = c(TRUE, TRUE)
   )
 
@@ -319,6 +364,7 @@ test_that("un coordinador que también es vocero aparece exactamente una vez en 
     .package = "dplyr"
   )
 
+  # "001" tiene cargo Coordinador de Brigada → aparece en reg_sup, no en reg_voc
   resultado <- suppressWarnings(generar_reporte_brigadas(
     reporte     = "semanal",
     corte       = corte,
@@ -326,7 +372,7 @@ test_that("un coordinador que también es vocero aparece exactamente una vez en 
     pool        = NULL,
     bd_completa = bd_completa,
     bd_aux      = bd_aux,
-    insumos     = make_insumos_cat(),
+    insumos     = make_insumos_cat(coord_nums = "001"),
     week_start  = 1L
   ))
 
@@ -338,6 +384,74 @@ test_that("un coordinador que también es vocero aparece exactamente una vez en 
 
   # Total correcto: 3 efectivos en total
   expect_equal(sum(resultado$registros$Total, na.rm = TRUE), 3L)
+})
+
+test_that("vocero activo que es supervisor de brigada de pruebas aparece como vocero, no como coordinador", {
+  # Escenario: "7911062889" es vocera activa en BRIGADA REAL y además es supervisor
+  # de "BRIGADA PRUEBAS" cuyos miembros están inactivos. Su cargo NO es
+  # "Coordinador de Brigada", por lo que debe aparecer como vocero.
+  corte     <- as.Date("2026-03-25")
+  fecha_ini <- as.Date("2026-03-23")
+  fechas    <- seq.Date(fecha_ini, corte, by = "day")
+
+  bd_completa <- tibble::tibble(
+    fecha            = fechas,
+    usuario_num      = "7911062889",
+    desglose         = "Efectivo",
+    duracion_minutos = 10,
+    fecha_inicio     = as.POSIXct(paste(as.character(fechas), "08:00:00")),
+    fecha_fin        = as.POSIXct(paste(as.character(fechas), "14:00:00"))
+  )
+
+  bd_aux <- tibble::tibble(
+    distrito           = rep("01", 3),
+    municipio          = c("Centro", "Sur", "Sur"),
+    nombre_brigada     = c("BRIGADA REAL", "BRIGADA PRUEBAS", "BRIGADA PRUEBAS"),
+    nombre_coordinador = c("COORD REAL", "VOC PRINCIPAL", "VOC PRINCIPAL"),
+    supervisor         = c("999", "7911062889", "7911062889"),
+    status_coord       = c(TRUE, TRUE, TRUE),
+    nombre_vocero      = c("VOC PRINCIPAL", "INACTIVO A", "INACTIVO B"),
+    vocero             = c("7911062889", "AAA", "BBB"),
+    status_vocero      = c(TRUE, FALSE, FALSE)
+  )
+
+  testthat::local_mocked_bindings(
+    tbl = function(src, ...) mock_usuarios_tibble(),
+    .package = "dplyr"
+  )
+
+  # "7911062889" NO tiene cargo Coordinador de Brigada → debe quedar como vocero
+  resultado <- suppressWarnings(generar_reporte_brigadas(
+    reporte     = "semanal",
+    corte       = corte,
+    id_proyecto = 10L,
+    pool        = NULL,
+    bd_completa = bd_completa,
+    bd_aux      = bd_aux,
+    insumos     = make_insumos_cat(coord_nums = character()),
+    week_start  = 1L
+  ))
+
+  registros <- resultado$registros
+
+  # Sin duplicados
+  voceros_reales <- dplyr::filter(registros, !is.na(vocero), vocero != "SIN ASIGNAR")
+  expect_equal(nrow(voceros_reales), dplyr::n_distinct(voceros_reales$vocero))
+
+  # Aparece como vocero bajo su brigada real (no bajo brigada de pruebas)
+  fila_voc <- dplyr::filter(registros, vocero == "7911062889")
+  expect_equal(nrow(fila_voc), 1L)
+  expect_equal(fila_voc$nombre_brigada, "BRIGADA REAL")
+
+  # Toda su actividad está en su fila
+  expect_equal(fila_voc$Total, length(fechas))
+
+  # Los inactivos de brigada de pruebas no aparecen en el reporte
+  expect_false(any(registros$vocero %in% c("AAA", "BBB"), na.rm = TRUE))
+
+  # Integridad: total del reporte == registros efectivos de bd_completa
+  n_esperado <- sum(bd_completa$desglose == "Efectivo")
+  expect_equal(sum(registros$Total, na.rm = TRUE), n_esperado)
 })
 
 test_that("duplicados en la tabla Usuarios no generan filas duplicadas en el reporte", {
