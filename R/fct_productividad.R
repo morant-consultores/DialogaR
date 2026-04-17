@@ -744,7 +744,7 @@ generar_reporte_productividad <- function(
 generar_tablas_reporte <- function(bd_prod) {
   # --- 1. PROCESAMIENTO TABLA ACUMULADA (RESUMEN) ---
   nombres <- bd_prod |> 
-    filter(!nombre_brigada == "-", !str_detect(nombre_brigada, "CAPACITACIONES")) |> 
+    filter(!nombre_brigada == "-", !stringr::str_detect(nombre_brigada, "CAPACITACIONES")) |>
     distinct(nombre_brigada) |> 
     pull(nombre_brigada) |> 
     sort()
