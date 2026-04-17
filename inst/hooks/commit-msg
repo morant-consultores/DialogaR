@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# =============================================================================
+# commit-msg hook — DialogaR ISO 27001 Compliance
+#
+# Valida:
+#   1. Formato Conventional Commits en español
+#   2. Commits tipo 'security' incluyen cuerpo con referencia ISO 27001
+#   3. Longitud del subject line (≤ 72 caracteres)
+#
+# Control ISO 27001: A.12.1 (Gestión de cambios y procedimientos de operación)
+#
+# Instalación: bash inst/hooks/install_hooks.sh
+# =============================================================================
+
+COMMIT_MSG_FILE=$1
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+RESET='\033[0m'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ignorar commits automáticos (merge, revert, squash, fixup, WIP inicial)
+# ─────────────────────────────────────────────────────────────────────────────
+
+FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
+
+if echo "$FIRST_LINE" | grep -qE "^(Merge|Revert|fixup!|squash!|Initial commit|WIP)"; then
+  exit 0
+fi
+
+# Ignorar mensajes generados por git (ej. commit --amend vacío)
+if echo "$FIRST_LINE" | grep -qE "^#"; then
+  exit 0
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. FORMATO CONVENTIONAL COMMITS
+#    <tipo>(<alcance opcional>): <descripción en imperativo>
+#    Control ISO 27001: A.12.1
+# ─────────────────────────────────────────────────────────────────────────────
+
+VALID_TYPES="feat|fix|refactor|test|docs|chore|security"
+
+if ! echo "$FIRST_LINE" | grep -qE "^($VALID_TYPES)(\([^)]+\))?: .{1,}"; then
+  echo -e "${RED}❌ [A.12.1] Formato de commit inválido.${RESET}"
+  echo ""
+  echo    "   Formato requerido:  <tipo>(<alcance>): <descripción imperativa>"
+  echo    "   Tipos válidos:      feat | fix | refactor | test | docs | chore | security"
+  echo ""
+  echo    "   Ejemplos válidos:"
+  echo    "     feat(etl): agregar soporte para zona Ascensión en normalizador"
+  echo    "     fix(auditoria): corregir conteo de duplicados en métricas"
+  echo    "     security(etl): sanitizar mensajes de error en cargar_insumos()"
+  echo ""
+  echo -e "   Tu mensaje:  ${YELLOW}$FIRST_LINE${RESET}"
+  exit 1
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. LONGITUD DEL SUBJECT LINE (≤ 72 caracteres)
+#    Buena práctica de trazabilidad — facilita lectura en git log y GitHub
+# ─────────────────────────────────────────────────────────────────────────────
+
+SUBJECT_LEN=${#FIRST_LINE}
+if [[ $SUBJECT_LEN -gt 72 ]]; then
+  echo -e "${YELLOW}⚠️  [A.12.1] Subject line muy largo: $SUBJECT_LEN caracteres (máximo: 72)${RESET}"
+  echo    "   Acortar la descripción o mover detalles al cuerpo del commit"
+  echo -e "   Tu mensaje: ${YELLOW}$FIRST_LINE${RESET}"
+  # Advertencia, no bloqueo
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. COMMITS TIPO 'security' — requieren cuerpo con referencia ISO 27001
+#    Control ISO 27001: A.12.1 (los cambios de seguridad deben ser rastreables)
+# ─────────────────────────────────────────────────────────────────────────────
+
+COMMIT_TYPE=$(echo "$FIRST_LINE" | grep -oE "^($VALID_TYPES)" || true)
+
+if [[ "$COMMIT_TYPE" == "security" ]]; then
+
+  # Verificar que hay cuerpo (líneas no vacías después del subject + blank line)
+  BODY=$(echo "$COMMIT_MSG" | tail -n +3 | grep -v "^[[:space:]]*$" || true)
+
+  if [[ -z "$BODY" ]]; then
+    echo -e "${RED}❌ [A.12.1] Commits tipo 'security' requieren cuerpo explicativo.${RESET}"
+    echo ""
+    echo    "   El cuerpo debe incluir (separado del subject por una línea en blanco):"
+    echo    "     1. Descripción del cambio realizado"
+    echo    "     2. Control ISO 27001 atendido  (ej: 'Control ISO 27001: A.12.4')"
+    echo    "     3. Comando de verificación      (ej: 'Verificación: grep -r ...')"
+    echo ""
+    echo    "   Ejemplo:"
+    echo    "     security(etl): sanitizar mensajes de error en cargar_insumos()"
+    echo    ""
+    echo    "     Removidos valores de columnas PII de los stop() en el bloque"
+    echo    "     de validación de esquema. Solo se exponen nombres de columna."
+    echo    ""
+    echo    "     Control ISO 27001: A.12.4 (Registro de actividad del operador)."
+    echo    "     Verificación: grep -r 'row\$nombre' R/ debe retornar vacío."
+    exit 1
+  fi
+
+  # Verificar que el cuerpo referencia un control ISO 27001
+  if ! echo "$BODY" | grep -qiE "(ISO 27001|A\.[0-9]+\.[0-9]+|A\.[0-9]+)"; then
+    echo -e "${RED}❌ [A.12.1] El cuerpo del commit 'security' debe referenciar un control ISO 27001.${RESET}"
+    echo ""
+    echo    "   Agregar al cuerpo una línea como:"
+    echo    "     Control ISO 27001: A.12.4 (Registro de actividad del operador)"
+    echo    "     Control ISO 27001: A.9.4  (Control de acceso a sistemas)"
+    echo    "     Control ISO 27001: A.8.2  (Clasificación de información)"
+    echo    "     Control ISO 27001: A.14.2 (Seguridad en el desarrollo)"
+    exit 1
+  fi
+
+  # Verificar que hay una línea de verificación
+  if ! echo "$BODY" | grep -qiE "(verificaci[oó]n|verification|comprobar|check):"; then
+    echo -e "${YELLOW}⚠️  [A.12.1] Recomendado: agregar línea 'Verificación:' al cuerpo del commit security.${RESET}"
+    echo    "   Ejemplo: Verificación: grep -r 'row\$nombre' R/ debe retornar vacío."
+    # Advertencia, no bloqueo
+  fi
+
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RESULTADO
+# ─────────────────────────────────────────────────────────────────────────────
+
+echo -e "${GREEN}✅ Commit-msg ISO 27001: formato válido.${RESET}"
+exit 0
