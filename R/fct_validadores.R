@@ -225,7 +225,9 @@ validar_bd_actividad <- function(df, valores_desglose = NULL) {
   if (nrow(df) == 0) return(invisible(df))
 
   # --- INTEGRIDAD ---
-  requeridas <- c("fecha", "usuario_num", "seccion", "desglose",
+  # `seccion` no forma parte del contrato universal: cada proyecto usa su propia
+  # columna geográfica (e.g. `seccion` en Lorenia, `ageb` en GM).
+  requeridas <- c("fecha", "usuario_num", "desglose",
                   "duracion_minutos", "fecha_inicio", "fecha_fin")
   .check_cols(df, requeridas, "error_contrato_actividad")
 
@@ -315,6 +317,25 @@ validar_bd_aux <- function(df) {
       " Voceros: ", paste(utils::head(sin_brigada$vocero, 10), collapse = ", "),
       ". Todo vocero activo debería tener nombre_brigada no-NA."
     )))
+  }
+
+  # Coordinadores con voceros activos en más de una brigada
+  coord_brigadas <- activos[!is.na(activos$supervisor) & activos$supervisor != "-", ]
+  if (nrow(coord_brigadas) > 0) {
+    n_brigadas_por_coord <- tapply(
+      coord_brigadas$nombre_brigada,
+      coord_brigadas$supervisor,
+      function(x) length(unique(x[!is.na(x)]))
+    )
+    coords_multi <- names(n_brigadas_por_coord[n_brigadas_por_coord > 1])
+    if (length(coords_multi) > 0) {
+      issues <- c(issues, list(paste0(
+        "! ", length(coords_multi), " coordinador(es) con voceros activos en más de una brigada.",
+        " Supervisores: ", paste(utils::head(coords_multi, 10), collapse = ", "),
+        ". La brigada del coordinador se tomará de sus voceros activos, pero la ambigüedad",
+        " puede indicar un problema en el catálogo."
+      )))
+    }
   }
 
   .emit_quality_summary(issues, "bd_aux", "warn_calidad_bd_aux")

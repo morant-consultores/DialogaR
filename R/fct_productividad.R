@@ -349,7 +349,7 @@ ensamblar_productividad <- function(
     # Universo de coordinadores
     if (coordinator_scope == "from_structure") {
       coord_base <- bd_aux |>
-        dplyr::filter(!is.na(supervisor), supervisor != "-") |>
+        dplyr::filter(!is.na(supervisor), supervisor != "-", status_vocero == TRUE) |>
         dplyr::distinct(supervisor, .keep_all = TRUE)
     } else {
       # Si llega aquí, está garantizado que 'pl' NO es NULL gracias a la validación inicial
@@ -358,6 +358,7 @@ ensamblar_productividad <- function(
         dplyr::distinct(supervisor)
 
       coord_base <- bd_aux |>
+        dplyr::filter(status_vocero == TRUE) |>
         dplyr::semi_join(coord_ids, by = "supervisor") |>
         dplyr::distinct(supervisor, .keep_all = TRUE)
     }
