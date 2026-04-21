@@ -479,12 +479,11 @@ postprocesar_output <- function(bd_prod, char_default = "-", num_default = 0) {
         }),
         collapse = "\n"
       )
-      cli::cli_abort(c(
-        "x" = "{nrow(con_datos)} vocero(s) activo(s) tienen registros de actividad pero su coordinador está inactivo.",
-        "!" = "El reporte fue detenido para evitar pérdida silenciosa de datos.",
-        " " = "Corrige el estado del coordinador en la base de datos antes de continuar.",
+      cli::cli_warn(c(
+        "!" = "{nrow(con_datos)} vocero(s) con actividad tienen coordinador inactivo (baja reciente o reasignacion pendiente). Se incluyen en el reporte.",
+        " " = "Verifica el estado del coordinador en la base de datos.",
         " " = detalle
-      ), class = "error_coord_inactivo_con_datos")
+      ))
     }
 
     if (nrow(sin_datos) > 0) {
@@ -504,8 +503,18 @@ postprocesar_output <- function(bd_prod, char_default = "-", num_default = 0) {
     }
   }
 
-  out_ordenado |>
-    dplyr::filter(is.na(status_coord) | status_coord)
+  # Excluir solo coordinadores inactivos sin actividad.
+  # Si hay actividad (viviendas_visitadas_nube > 0), se conserva la fila aunque
+  # el coordinador este inactivo (baja reciente / reasignacion pendiente).
+  if ("viviendas_visitadas_nube" %in% names(out_ordenado)) {
+    out_ordenado |>
+      dplyr::filter(
+        is.na(status_coord) | status_coord | viviendas_visitadas_nube > 0
+      )
+  } else {
+    out_ordenado |>
+      dplyr::filter(is.na(status_coord) | status_coord)
+  }
 }
 
 
