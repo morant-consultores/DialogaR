@@ -349,7 +349,7 @@ ensamblar_productividad <- function(
     # Universo de coordinadores
     if (coordinator_scope == "from_structure") {
       coord_base <- bd_aux |>
-        dplyr::filter(!is.na(supervisor), supervisor != "-") |>
+        dplyr::filter(!is.na(supervisor), supervisor != "-", status_vocero == TRUE) |>
         dplyr::distinct(supervisor, .keep_all = TRUE)
     } else {
       # Si llega aquí, está garantizado que 'pl' NO es NULL gracias a la validación inicial
@@ -358,6 +358,7 @@ ensamblar_productividad <- function(
         dplyr::distinct(supervisor)
 
       coord_base <- bd_aux |>
+        dplyr::filter(status_vocero == TRUE) |>
         dplyr::semi_join(coord_ids, by = "supervisor") |>
         dplyr::distinct(supervisor, .keep_all = TRUE)
     }
@@ -478,12 +479,11 @@ postprocesar_output <- function(bd_prod, char_default = "-", num_default = 0) {
         }),
         collapse = "\n"
       )
-      cli::cli_abort(c(
-        "x" = "{nrow(con_datos)} vocero(s) activo(s) tienen registros de actividad pero su coordinador está inactivo.",
-        "!" = "El reporte fue detenido para evitar pérdida silenciosa de datos.",
-        " " = "Corrige el estado del coordinador en la base de datos antes de continuar.",
+      cli::cli_warn(c(
+        "!" = "{nrow(con_datos)} vocero(s) con actividad tienen coordinador inactivo (baja reciente o reasignacion pendiente). Se incluyen en el reporte.",
+        " " = "Verifica el estado del coordinador en la base de datos.",
         " " = detalle
-      ), class = "error_coord_inactivo_con_datos")
+      ))
     }
 
     if (nrow(sin_datos) > 0) {
@@ -503,8 +503,18 @@ postprocesar_output <- function(bd_prod, char_default = "-", num_default = 0) {
     }
   }
 
-  out_ordenado |>
-    dplyr::filter(is.na(status_coord) | status_coord)
+  # Excluir solo coordinadores inactivos sin actividad.
+  # Si hay actividad (viviendas_visitadas_nube > 0), se conserva la fila aunque
+  # el coordinador este inactivo (baja reciente / reasignacion pendiente).
+  if ("viviendas_visitadas_nube" %in% names(out_ordenado)) {
+    out_ordenado |>
+      dplyr::filter(
+        is.na(status_coord) | status_coord | viviendas_visitadas_nube > 0
+      )
+  } else {
+    out_ordenado |>
+      dplyr::filter(is.na(status_coord) | status_coord)
+  }
 }
 
 
@@ -726,6 +736,20 @@ generar_reporte_productividad <- function(
 
 
 
+#' Generar tablas de resumen para el reporte de productividad
+#'
+#' @param bd_prod Data frame producido por \code{generar_reporte_productividad()},
+#'   con columnas \code{nombre_brigada} y métricas de actividad por vocero.
+#'
+#' @return Lista de tablas (flextable / data frame) listas para insertar en la
+#'   presentación PPTX.
+#'
+#' @section Seguridad y Privacidad:
+#' Nivel de datos: INTERNO (métricas agregadas por brigada y coordinador).
+#' No contiene PII de encuestados. Los nombres de coordinador son datos
+#' operativos internos. Control ISO 27001: A.8.2 (Clasificación de información).
+#'
+#' @importFrom flextable hrule padding
 #' @export
 generar_tablas_reporte <- function(bd_prod) {
   # --- 1. PROCESAMIENTO TABLA ACUMULADA (RESUMEN) ---
@@ -756,8 +780,29 @@ generar_tablas_reporte <- function(bd_prod) {
       usuarios = sum(dialogos_efectivos_nube > 0, na.rm = TRUE),
       dialogos = sum(dialogos_efectivos_nube, na.rm = TRUE),
       .groups = "drop"
-    ) |>
-    mutate(promedio = round(dialogos / if_else(usuarios == 0, NA_real_, usuarios), 2))
+    )
+
+  brigadas_huerfanas <- por_brigada |>
+    filter(usuarios == 0, dialogos > 0)
+
+  if (nrow(brigadas_huerfanas) > 0) {
+    detalle <- paste(
+      sprintf("  - %s: %d diálogo(s)", brigadas_huerfanas$nombre, brigadas_huerfanas$dialogos),
+      collapse = "\n"
+    )
+    stop(sprintf(
+      paste0(
+        "generar_tablas_reporte: %d brigada(s) tienen diálogos registrados pero ningún",
+        " usuario con actividad. Esto indica una inconsistencia entre bd_prod y la",
+        " estructura operativa. Brigadas afectadas:\n%s"
+      ),
+      nrow(brigadas_huerfanas), detalle
+    ))
+  }
+
+  por_brigada <- por_brigada |>
+    filter(usuarios > 0) |>
+    mutate(promedio = round(dialogos / usuarios, 2))
 
   tabla_acumulada <- bind_rows(
     general     |> mutate(.ord0 = 0, .ord2 = 0),

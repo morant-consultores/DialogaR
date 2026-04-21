@@ -116,14 +116,30 @@ generar_reporte_brigadas <- function(
     dplyr::distinct(vocero, .keep_all = TRUE)
 
   # 3. Función interna para procesar métricas ----
+
+  # Coordinadores genuinos: determinados por Cargo, no por la relación supervisor en bd_aux.
+  # Evita que voceros activos que también aparecen como supervisor en alguna brigada
+  # (ej. brigada de pruebas) sean promovidos a fila de coordinador con metadatos incorrectos.
+  coord_nums <- insumos$cat$usuarios |>
+    dplyr::filter(cargo == "Coordinador de Brigada") |>
+    dplyr::pull(num)
+
   procesar_metricas <- function(df_stats, nombre_col_valor) {
     # Unir Voceros (se excluyen filas sin vocero asignado: nunca tienen actividad
-    # y generarían filas fantasma de cero tras tidyr::complete)
+    # y generarían filas fantasma de cero tras tidyr::complete).
+    # Voceros inactivos (status_vocero = FALSE) se excluyen SALVO que tengan
+    # actividad en df_stats: un vocero dado de baja dentro del periodo de reporte
+    # sí registró diálogos y debe aparecer en la estructura.
     reg_voc <- bd_aux |>
-      dplyr::filter(!is.na(vocero)) |>
+      dplyr::filter(
+        !is.na(vocero),
+        is.na(status_vocero) | status_vocero | vocero %in% df_stats$usuario_num
+      ) |>
       dplyr::left_join(df_stats, by = dplyr::join_by(vocero == usuario_num))
 
-    # Unir Supervisores
+    # Unir Supervisores: solo personas con Cargo = "Coordinador de Brigada".
+    # status_vocero se asigna desde status_coord (status del propio coordinador),
+    # no desde el status del vocero del row de bd_aux (que sería arbitrario).
     reg_sup <- bd_aux |>
       dplyr::transmute(
         municipio,
@@ -134,10 +150,11 @@ generar_reporte_brigadas <- function(
         status_coord,
         nombre_vocero = nombre_coordinador,
         vocero = supervisor,
-        status_vocero
+        status_vocero = status_coord
       ) |>
       dplyr::arrange(dplyr::desc(nombre_brigada)) |>
       dplyr::distinct(distrito, nombre_coordinador, .keep_all = TRUE) |>
+      dplyr::filter(vocero %in% coord_nums) |>
       dplyr::left_join(df_stats, by = dplyr::join_by(supervisor == usuario_num))
 
     # Excluir de reg_voc a los coordinadores que ya tienen fila propia en reg_sup
@@ -203,7 +220,14 @@ generar_reporte_brigadas <- function(
     )
   }
 
-  n_total_esperado <- sum(stats_base$n, na.rm = TRUE)
+  # Ancla de integridad: conteo directo sobre bd_completa (fuente de verdad),
+  # independiente del agregado stats_base para evitar validaciones circulares.
+  n_total_esperado <- sum(
+    bd_completa$desglose == "Efectivo" &
+      bd_completa$fecha >= fecha_inicio_r &
+      bd_completa$fecha <= fecha_fin_r,
+    na.rm = TRUE
+  )
 
   reg_final <- procesar_metricas(stats_base, "n")
 
@@ -243,7 +267,8 @@ generar_reporte_brigadas <- function(
       )
     ) |>
     dplyr::ungroup() |>
-    dplyr::select(-dplyr::any_of("NA"))
+    dplyr::select(-dplyr::any_of("NA")) |>
+    dplyr::filter(is.na(status_coord) | status_coord | Total > 0)
 
   # 7. Consolidación Final ----
   duracion_trabajo <- reg_final |>
@@ -299,7 +324,8 @@ generar_reporte_brigadas <- function(
         fecha_baja
       )
     ) |>
-    dplyr::ungroup()
+    dplyr::ungroup() |>
+    dplyr::filter(is.na(status_coord) | status_coord | Total > 0)
 
   # Alerta de Auditoría
   huerfanos <- sum(

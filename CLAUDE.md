@@ -86,4 +86,129 @@ All queries use `dplyr::tbl()` + lazy evaluation with explicit `.collect()` call
 - **`dev/` directory:** Excluded from package build (`.Rbuildignore`). Contains setup scripts only, not production code.
 - **Documentation:** All exported functions require full roxygen2 docs including `@param`, `@return`, `@export`, and a `@section Seguridad y Privacidad:` block for functions handling PII
 
+## Seguridad y Cumplimiento (ISO 27001 / LFPDPPP)
+
+### Clasificación de datos
+
+DialogaR maneja tres niveles de sensibilidad. Toda función nueva debe declarar en su bloque roxygen2 con cuál trabaja:
+
+| Nivel | Contenido | Ejemplo |
+|-------|-----------|---------|
+| **PÚBLICO** | Métricas agregadas, conteos por zona, sin identificadores | Totales de productividad por distrito |
+| **INTERNO** | Datos de brigadas y usuarios del sistema | Nombre de brigadista, zona asignada, rol |
+| **CONFIDENCIAL** | Cualquier dato de encuestados | Nombre, domicilio, teléfono, preferencia política |
+
+Declaración obligatoria en roxygen2 para funciones que toquen datos INTERNO o CONFIDENCIAL:
+
+```r
+#' @section Seguridad y Privacidad:
+#' Nivel de datos: CONFIDENCIAL (PII de encuestados).
+#' No registrar en logs. No exponer en mensajes de error.
+#' Seleccionar únicamente las columnas mínimas necesarias para el reporte.
+#' Control ISO 27001: A.8.2 (Clasificación de información).
+```
+
+### Manejo de PII en código
+
+- Nunca usar `print()`, `message()`, o `warning()` sobre data frames que contengan columnas PII
+- Los mensajes de error deben referenciar IDs, índices o conteos — nunca valores de columnas sensibles:
+
+```r
+# CORRECTO
+stop(sprintf("Fila %d: valor de encuesta fuera del rango esperado [1-5]", i))
+
+# INCORRECTO — expone PII en el stack trace
+stop(sprintf("Error con encuestado %s, tel %s", row$nombre, row$telefono))
+```
+
+- En bloques `tryCatch`, capturar la condición sin re-emitir el objeto completo (que puede contener PII):
+
+```r
+# CORRECTO
+tryCatch(
+  procesar(df),
+  error = function(e) stop(sprintf("Error en procesamiento: %s", conditionMessage(e)))
+)
+```
+
+- Al usar `dplyr::select()` o `dplyr::tbl()`, seleccionar explícitamente solo las columnas necesarias — nunca `SELECT *` sobre tablas de encuestados
+
+### Gestión de credenciales (A.9 / A.10)
+
+- Toda credencial vive exclusivamente en `.Renviron` o en el keychain del sistema; nunca en código fuente ni en archivos de configuración commiteados
+- Los tokens de Google Drive deben usar scope mínimo (`drive.file`, no `drive`)
+- Validar la existencia de variables de entorno al inicio de cada función que las requiera:
+
+```r
+stopifnot(
+  "DB_HOST no configurado — revisar .Renviron" = nchar(Sys.getenv("DB_HOST")) > 0,
+  "DB_PASS no configurado — revisar .Renviron" = nchar(Sys.getenv("DB_PASS")) > 0
+)
+```
+
+- `.Renviron`, `*.token`, `*.rds` con datos reales y cualquier output de reporte nunca deben commitearse; verificar `.gitignore` antes de hacer `git add`
+
+### Convenciones de commits (A.12.1 — Gestión de cambios)
+
+Usar **Conventional Commits** en español. Un commit = un cambio lógico. No mezclar refactors con features ni correcciones de seguridad con cambios funcionales.
+
+```
+<tipo>(<alcance>): <descripción en imperativo>
+```
+
+Tipos válidos:
+
+| Tipo | Cuándo usarlo |
+|------|---------------|
+| `feat` | Nueva funcionalidad |
+| `fix` | Corrección de bug |
+| `refactor` | Cambio sin impacto funcional |
+| `test` | Solo tests |
+| `docs` | Solo documentación |
+| `chore` | Dependencias, CI, configuración |
+| `security` | Cambio con implicación de seguridad — **siempre requiere cuerpo explicativo** |
+
+Los commits `security` deben incluir en el cuerpo: qué control ISO 27001 atienden y cómo verificar la corrección.
+
+```
+security(etl): sanitizar mensajes de error en cargar_insumos()
+
+Removidos valores de columnas PII de los stop() en el bloque de
+validación de esquema. Ahora solo se exponen nombres de columna y
+conteos de filas.
+
+Control ISO 27001: A.12.4 (Registro de actividad del operador).
+Verificación: grep -r "row\$nombre\|row\$telefono" R/ debe retornar vacío.
+```
+
+### Dependencias externas (A.14.2 — Seguridad en desarrollo)
+
+- Antes de agregar un paquete a `DESCRIPTION`, verificar que está en CRAN y tiene mantenimiento activo (último release < 2 años)
+- Paquetes que manejen conexiones de red, credenciales o datos de usuario requieren justificación explícita en el commit de incorporación
+- No instalar paquetes desde GitHub en código de producción (`remotes::install_github`) sin aprobación documentada en el commit
+
+### Separación de entornos (A.12.1)
+
+El directorio `dev/` es exclusivamente para exploración. Ningún script en `dev/` debe conectarse a bases de datos de producción sin una guardia explícita al inicio:
+
+```r
+if (Sys.getenv("DIALOGA_ENV") != "development") {
+  stop("Este script es solo para desarrollo. Configurar DIALOGA_ENV=development en .Renviron.")
+}
+```
+
+### Encabezado obligatorio en archivos R nuevos (A.12.1 — Trazabilidad)
+
+Todo archivo `.R` nuevo en `R/` debe iniciar con este bloque antes del primer `#'`:
+
+```r
+# ============================================================
+# Módulo    : <nombre_modulo>
+# Propósito : <descripción en una línea>
+# Datos     : PÚBLICO | INTERNO | CONFIDENCIAL
+# Control   : <controles ISO 27001 aplicables, ej. A.8.2, A.9.4>
+# Revisión  : YYYY-MM-DD
+# ============================================================
+```
+
 
