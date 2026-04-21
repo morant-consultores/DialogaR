@@ -220,7 +220,14 @@ generar_reporte_brigadas <- function(
     )
   }
 
-  n_total_esperado <- sum(stats_base$n, na.rm = TRUE)
+  # Ancla de integridad: conteo directo sobre bd_completa (fuente de verdad),
+  # independiente del agregado stats_base para evitar validaciones circulares.
+  n_total_esperado <- sum(
+    bd_completa$desglose == "Efectivo" &
+      bd_completa$fecha >= fecha_inicio_r &
+      bd_completa$fecha <= fecha_fin_r,
+    na.rm = TRUE
+  )
 
   reg_final <- procesar_metricas(stats_base, "n")
 
@@ -260,7 +267,8 @@ generar_reporte_brigadas <- function(
       )
     ) |>
     dplyr::ungroup() |>
-    dplyr::select(-dplyr::any_of("NA"))
+    dplyr::select(-dplyr::any_of("NA")) |>
+    dplyr::filter(is.na(status_coord) | status_coord | Total > 0)
 
   # 7. Consolidación Final ----
   duracion_trabajo <- reg_final |>
@@ -316,7 +324,8 @@ generar_reporte_brigadas <- function(
         fecha_baja
       )
     ) |>
-    dplyr::ungroup()
+    dplyr::ungroup() |>
+    dplyr::filter(is.na(status_coord) | status_coord | Total > 0)
 
   # Alerta de Auditoría
   huerfanos <- sum(

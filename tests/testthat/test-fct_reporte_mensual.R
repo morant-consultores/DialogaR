@@ -491,3 +491,44 @@ test_that("duplicados en la tabla Usuarios no generan filas duplicadas en el rep
 
   expect_equal(nrow(voceros_reales), dplyr::n_distinct(voceros_reales$vocero))
 })
+
+test_that("registros de bd_completa fuera del periodo no se cuelan en el reporte", {
+  corte     <- as.Date("2026-03-25")
+  fecha_ini <- as.Date("2026-03-23")
+  fechas_dentro <- seq.Date(fecha_ini, corte, by = "day")
+
+  # 3 efectivos dentro del periodo, 2 fuera (semana anterior)
+  bd_completa <- dplyr::bind_rows(
+    make_bd_completa_multi(
+      fechas       = fechas_dentro,
+      usuario_nums = rep("001", length(fechas_dentro))
+    ),
+    make_bd_completa_multi(
+      fechas       = c(as.Date("2026-03-16"), as.Date("2026-03-17")),
+      usuario_nums = c("001", "001")
+    )
+  )
+
+  testthat::local_mocked_bindings(
+    tbl = function(src, ...) mock_usuarios_tibble(),
+    .package = "dplyr"
+  )
+
+  resultado <- suppressWarnings(generar_reporte_brigadas(
+    reporte     = "semanal",
+    corte       = corte,
+    id_proyecto = 10L,
+    pool        = NULL,
+    bd_completa = bd_completa,
+    bd_aux      = make_bd_aux_m(),
+    insumos     = make_insumos_cat(),
+    week_start  = 1L
+  ))
+
+  n_dentro <- sum(
+    bd_completa$desglose == "Efectivo" &
+      bd_completa$fecha >= fecha_ini &
+      bd_completa$fecha <= corte
+  )
+  expect_equal(sum(resultado$registros$Total, na.rm = TRUE), n_dentro)
+})
