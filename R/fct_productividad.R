@@ -749,6 +749,7 @@ generar_reporte_productividad <- function(
 #' No contiene PII de encuestados. Los nombres de coordinador son datos
 #' operativos internos. Control ISO 27001: A.8.2 (Clasificación de información).
 #'
+#' @importFrom flextable hrule padding
 #' @export
 generar_tablas_reporte <- function(bd_prod) {
   # --- 1. PROCESAMIENTO TABLA ACUMULADA (RESUMEN) ---
