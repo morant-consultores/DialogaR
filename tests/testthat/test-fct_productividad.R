@@ -158,6 +158,65 @@ test_that("generar_reporte_productividad fails with pl_extra when allow_multiple
 # TESTS: crear_tabla_usuarios (funciones_pdf.R)
 # =========================================================================
 
+# =========================================================================
+# TESTS: generar_tablas_reporte
+# =========================================================================
+
+make_bd_prod_tablas <- function(
+  nombre_brigada     = "BRIGADA NORTE",
+  nombre_coordinador = "COORD A",
+  nombre_vocero      = "VOC 001",
+  dialogos           = 5L,
+  tiene_pase         = TRUE
+) {
+  tibble::tibble(
+    nombre_brigada        = nombre_brigada,
+    nombre_coordinador    = nombre_coordinador,
+    nombre_vocero         = nombre_vocero,
+    dialogos_efectivos_nube = dialogos,
+    tiene_pase_lista      = tiene_pase,
+    numero_pases_lista    = as.integer(tiene_pase)
+  )
+}
+
+test_that("generar_tablas_reporte devuelve lista con resumen, detalle y cruda", {
+  bd_prod <- make_bd_prod_tablas()
+
+  resultado <- generar_tablas_reporte(bd_prod)
+
+  expect_type(resultado, "list")
+  expect_true(all(c("resumen", "detalle", "cruda") %in% names(resultado)))
+  expect_s3_class(resultado$cruda, "data.frame")
+  expect_true("TOTAL" %in% resultado$cruda$nombre)
+  expect_true("BRIGADA NORTE" %in% resultado$cruda$nombre)
+})
+
+test_that("generar_tablas_reporte incluye correctamente brigada con coordinador inactivo con actividad", {
+  # Escenario: bd_prod contiene una fila del coordinador con status_coord = FALSE
+  # pero con dialogos > 0. postprocesar_output ahora la conserva; este test
+  # verifica que generar_tablas_reporte no lanza error y la brigada aparece
+  # en cruda con sus diálogos contabilizados.
+  bd_prod <- tibble::tibble(
+    nombre_brigada          = c("BRIGADA SUR", "BRIGADA SUR"),
+    nombre_coordinador      = c("COORD BAJA", "COORD BAJA"),
+    nombre_vocero           = c("COORD BAJA", "VOC 002"),   # fila coord + fila vocero
+    dialogos_efectivos_nube = c(3L, 7L),
+    tiene_pase_lista        = c(FALSE, TRUE),
+    numero_pases_lista      = c(0L, 1L)
+  )
+
+  resultado <- expect_no_error(generar_tablas_reporte(bd_prod))
+
+  fila <- dplyr::filter(resultado$cruda, nombre == "BRIGADA SUR")
+  expect_equal(nrow(fila), 1L)
+  expect_equal(fila$dialogos, 10L)   # 3 + 7
+  expect_equal(fila$usuarios, 2L)    # ambas filas tienen dialogos > 0
+})
+
+# =========================================================================
+# TESTS: crear_tabla_usuarios (funciones_pdf.R)
+# =========================================================================
+
 test_that("crear_tabla_usuarios returns pivoted data frame with 6 metric rows", {
   corte <- as.Date("2026-03-25")
   bd <- tibble::tibble(
