@@ -68,6 +68,24 @@ cargar_usuarios_cat <- function(pool, id_proyecto, usuarios_asignados = NULL) {
     dplyr::distinct(id_usuario, .keep_all = TRUE)
 }
 
+cargar_coordinadores_cat <- function(pool, id_proyecto) {
+  dplyr::tbl(pool, "Usuarios") |>
+    dplyr::filter(
+      IdProyecto == !!id_proyecto,
+      Cargo == "Coordinador de Brigada"
+    ) |>
+    dplyr::select(Id, Num, Nombre, APaterno, AMaterno, Status) |>
+    dplyr::collect() |>
+    janitor::clean_names() |>
+    dplyr::mutate(dplyr::across(nombre:a_materno, ~ tidyr::replace_na(.x, ""))) |>
+    dplyr::transmute(
+      id_supervisor   = id,
+      supervisor      = as.character(num),
+      nombre_coordinador = toupper(stringr::str_squish(paste(nombre, a_paterno, a_materno))),
+      status_coord    = status
+    )
+}
+
 cargar_brigadas_cat <- function(pool, id_proyecto) {
   dplyr::tbl(pool, "Brigadas") |>
     dplyr::filter(IdProyecto == !!id_proyecto) |>
@@ -188,119 +206,27 @@ resolver_estructura_corte <- function(usuario_log, corte, usuarios_asignados = N
 construir_bd_aux <- function(
   estructura_corte,
   usuarios_cat,
+  coordinadores_cat,
   brigadas_cat,
   municipios_cat
 ) {
-  # Brigada canónica de cada coordinador: la brigada asignada a su propia fila
-  # en estructura_corte (resolver_estructura_corte ya garantiza 1 fila por usuario).
-  brigada_canon_coord <- estructura_corte |>
-    dplyr::select(id_supervisor = id_usuario, id_brigada_coord = id_brigada)
-
-  estructura_enriquecida <- estructura_corte |>
-    dplyr::left_join(brigada_canon_coord, by = "id_supervisor")
-
-  # Detectar relaciones espurias: vocero en brigada distinta a la de su coordinador
-  espurias <- estructura_enriquecida |>
-    dplyr::filter(
-      !is.na(id_supervisor),
-      !is.na(id_brigada_coord),
-      id_brigada != id_brigada_coord
-    )
-
-  # Solo reportar espurias con vocero real: los slots vacíos (id_usuario sin match
-  # en usuarios_cat) ya se eliminan de bd_aux y no merecen aparecer en la alerta.
-  espurias_reales <- espurias |>
-    dplyr::filter(id_usuario %in% usuarios_cat$id_usuario)
-
-  if (nrow(espurias_reales) > 0) {
-    resumen <- espurias_reales |>
-      dplyr::left_join(
-        brigadas_cat |> dplyr::select(id_brigada, nombre_brigada),
-        by = "id_brigada"
-      ) |>
-      dplyr::left_join(
-        brigadas_cat |>
-          dplyr::transmute(
-            id_brigada_coord = id_brigada,
-            nombre_brigada_coord = nombre_brigada
-          ),
-        by = "id_brigada_coord"
-      ) |>
-      dplyr::left_join(
-        usuarios_cat |>
-          dplyr::transmute(id_supervisor = id_usuario, num_coord = num),
-        by = "id_supervisor"
-      ) |>
-      dplyr::count(
-        num_coord,
-        nombre_brigada_coord,
-        nombre_brigada,
-        name = "n_voceros"
-      ) |>
-      dplyr::arrange(num_coord)
-
-    lineas <- resumen |>
-      dplyr::transmute(
-        msg = sprintf(
-          "Coordinador %s (brigada '%s') supervisa %d vocero(s) asignados a brigada '%s'",
-          num_coord,
-          nombre_brigada_coord,
-          n_voceros,
-          nombre_brigada
-        )
-      ) |>
-      dplyr::pull(msg)
-
-    cli::cli_warn(c(
-      "!" = sprintf(
-        "bd_aux: %d relaci\u00f3n(es) espuria(s) coordinador\u2013brigada detectadas (solo alerta, no se excluyen).",
-        nrow(espurias_reales)
-      ),
-      stats::setNames(lineas, rep("*", length(lineas)))
-    ))
-  }
-
-  # Las relaciones espurias con vocero real nunca se excluyen: perder voceros de
-  # la estructura significa perder su actividad en todos los reportes posteriores.
-  # Las espurias sin vocero (slots vacíos de brigada ajena) sí se eliminan al final:
-  # no tienen actividad que proteger y pueden duplicar o malasignar filas de coordinador
-  # en procesar_metricas() porque su (distrito, nombre_coordinador) genera una combinación
-  # extra que no colapsa con las filas reales del coordinador.
-  estructura_limpia <- estructura_enriquecida |>
-    dplyr::mutate(
-      es_espuria = !is.na(id_supervisor) &
-        !is.na(id_brigada_coord) &
-        id_brigada != id_brigada_coord
-    ) |>
-    dplyr::select(-id_brigada_coord)
-
-  estructura_limpia |>
+  estructura_corte |>
     dplyr::left_join(municipios_cat, by = "id_municipio") |>
-    dplyr::left_join(brigadas_cat, by = "id_brigada") |>
+    dplyr::left_join(brigadas_cat,   by = "id_brigada") |>
     dplyr::left_join(
       usuarios_cat |>
         dplyr::transmute(
           id_usuario,
-          vocero = num,
+          vocero        = num,
           nombre_vocero = nombre_completo,
           status_vocero = status
         ),
       by = "id_usuario"
     ) |>
-    dplyr::left_join(
-      usuarios_cat |>
-        dplyr::transmute(
-          id_supervisor = id_usuario,
-          supervisor = num,
-          nombre_coordinador = nombre_completo,
-          status_coord = status
-        ),
-      by = "id_supervisor"
-    ) |>
-    dplyr::filter(!es_espuria | !is.na(vocero)) |>
+    dplyr::left_join(coordinadores_cat, by = "id_supervisor") |>
     dplyr::transmute(
-      distrito = NA_character_,
-      municipio = municipio_log,
+      distrito           = NA_character_,
+      municipio          = municipio_log,
       nombre_brigada,
       nombre_coordinador,
       supervisor,
@@ -410,11 +336,12 @@ cargar_insumos <- function(
   normalizador_actividad = NULL,
   postprocess_insumos = NULL
 ) {
-  usuarios_asignados <- cargar_usuarios_asignados(pool, fuentes_actividad)
-  usuarios_cat <- cargar_usuarios_cat(pool, id_proyecto, usuarios_asignados)
-  brigadas_cat <- cargar_brigadas_cat(pool, id_proyecto)
-  municipios_cat <- cargar_municipios_cat(pool)
-  usuario_log <- cargar_usuario_log(pool, id_proyecto)
+  usuarios_asignados  <- cargar_usuarios_asignados(pool, fuentes_actividad)
+  usuarios_cat        <- cargar_usuarios_cat(pool, id_proyecto, usuarios_asignados)
+  coordinadores_cat   <- cargar_coordinadores_cat(pool, id_proyecto)
+  brigadas_cat        <- cargar_brigadas_cat(pool, id_proyecto)
+  municipios_cat      <- cargar_municipios_cat(pool)
+  usuario_log         <- cargar_usuario_log(pool, id_proyecto)
 
   bd_actividad <- cargar_actividad(
     pool = pool,
@@ -430,6 +357,7 @@ cargar_insumos <- function(
   bd_aux <- construir_bd_aux(
     estructura_corte,
     usuarios_cat,
+    coordinadores_cat,
     brigadas_cat,
     municipios_cat
   )
