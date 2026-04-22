@@ -15,12 +15,26 @@
 
 # ---- 1) Helpers: Catálogos Estándar (No exportados) ---------------------
 
-cargar_usuarios_cat <- function(pool, id_proyecto) {
-  dplyr::tbl(pool, "Usuarios") |>
+cargar_usuarios_asignados <- function(pool, fuentes_actividad) {
+  tablas <- purrr::map_chr(fuentes_actividad, "tabla")
+  ids    <- stringr::str_extract(tablas, "(?<=snapshot_id_)\\d+")
+  ids    <- ids[!is.na(ids)]
+  if (length(ids) == 0) return(integer(0))
+  dplyr::tbl(pool, "UsuariosEncuesta") |>
+    dplyr::filter(EncuestaId %in% ids, Activo == TRUE) |>
+    dplyr::pull(UsuarioId)
+}
+
+cargar_usuarios_cat <- function(pool, id_proyecto, usuarios_asignados = NULL) {
+  q <- dplyr::tbl(pool, "Usuarios") |>
     dplyr::filter(
       IdProyecto == !!id_proyecto,
       Capacitacion == TRUE | Cargo == "Coordinador de Brigada"
-    ) |>
+    )
+  if (!is.null(usuarios_asignados) && length(usuarios_asignados) > 0) {
+    q <- q |> dplyr::filter(Id %in% !!usuarios_asignados)
+  }
+  q |>
     dplyr::select(
       Id,
       Num,
@@ -146,9 +160,13 @@ cargar_actividad <- function(
   })
 }
 
-resolver_estructura_corte <- function(usuario_log, corte) {
-  usuario_log |>
-    filter(fecha_evento <= as.Date(corte)) |>
+resolver_estructura_corte <- function(usuario_log, corte, usuarios_asignados = NULL) {
+  q <- usuario_log |>
+    dplyr::filter(fecha_evento <= as.Date(corte))
+  if (!is.null(usuarios_asignados) && length(usuarios_asignados) > 0) {
+    q <- q |> dplyr::filter(IdUsuario %in% !!usuarios_asignados)
+  }
+  q |>
     arrange(IdUsuario, IdHistorico) |>
     group_by(IdUsuario) |>
     tidyr::fill(IdCargo, IdSupervisor, IdBrigada, .direction = "down") |>
@@ -392,7 +410,8 @@ cargar_insumos <- function(
   normalizador_actividad = NULL,
   postprocess_insumos = NULL
 ) {
-  usuarios_cat <- cargar_usuarios_cat(pool, id_proyecto)
+  usuarios_asignados <- cargar_usuarios_asignados(pool, fuentes_actividad)
+  usuarios_cat <- cargar_usuarios_cat(pool, id_proyecto, usuarios_asignados)
   brigadas_cat <- cargar_brigadas_cat(pool, id_proyecto)
   municipios_cat <- cargar_municipios_cat(pool)
   usuario_log <- cargar_usuario_log(pool, id_proyecto)
@@ -406,7 +425,7 @@ cargar_insumos <- function(
     normalizador = normalizador_actividad
   )
 
-  estructura_corte <- resolver_estructura_corte(usuario_log, corte)
+  estructura_corte <- resolver_estructura_corte(usuario_log, corte, usuarios_asignados)
 
   bd_aux <- construir_bd_aux(
     estructura_corte,
