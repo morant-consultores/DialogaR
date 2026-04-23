@@ -166,6 +166,7 @@ make_bd_prod_tablas <- function(
   nombre_brigada     = "BRIGADA NORTE",
   nombre_coordinador = "COORD A",
   nombre_vocero      = "VOC 001",
+  municipio          = "Centro",
   dialogos           = 5L,
   tiene_pase         = TRUE
 ) {
@@ -173,6 +174,7 @@ make_bd_prod_tablas <- function(
     nombre_brigada        = nombre_brigada,
     nombre_coordinador    = nombre_coordinador,
     nombre_vocero         = nombre_vocero,
+    municipio             = municipio,
     dialogos_efectivos_nube = dialogos,
     tiene_pase_lista      = tiene_pase,
     numero_pases_lista    = as.integer(tiene_pase)
@@ -200,6 +202,7 @@ test_that("generar_tablas_reporte incluye correctamente brigada con coordinador 
     nombre_brigada          = c("BRIGADA SUR", "BRIGADA SUR"),
     nombre_coordinador      = c("COORD BAJA", "COORD BAJA"),
     nombre_vocero           = c("COORD BAJA", "VOC 002"),   # fila coord + fila vocero
+    municipio               = c("Sur", "Sur"),
     dialogos_efectivos_nube = c(3L, 7L),
     tiene_pase_lista        = c(FALSE, TRUE),
     numero_pases_lista      = c(0L, 1L)
