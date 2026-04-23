@@ -25,11 +25,11 @@ cargar_usuarios_asignados <- function(pool, fuentes_actividad) {
     dplyr::pull(UsuarioId)
 }
 
-cargar_usuarios_cat <- function(pool, id_proyecto, usuarios_asignados = NULL) {
+cargar_usuarios_cat <- function(pool, id_proyecto, usuarios_asignados = NULL, cargo_coordinador = "Coordinador de Brigada") {
   q <- dplyr::tbl(pool, "Usuarios") |>
     dplyr::filter(
       IdProyecto == !!id_proyecto,
-      Capacitacion == TRUE | Cargo == "Coordinador de Brigada"
+      Capacitacion == TRUE | Cargo == !!cargo_coordinador
     )
   if (!is.null(usuarios_asignados) && length(usuarios_asignados) > 0) {
     q <- q |> dplyr::filter(Id %in% !!usuarios_asignados)
@@ -68,11 +68,11 @@ cargar_usuarios_cat <- function(pool, id_proyecto, usuarios_asignados = NULL) {
     dplyr::distinct(id_usuario, .keep_all = TRUE)
 }
 
-cargar_coordinadores_cat <- function(pool, id_proyecto) {
+cargar_coordinadores_cat <- function(pool, id_proyecto, cargo_coordinador = "Coordinador de Brigada") {
   dplyr::tbl(pool, "Usuarios") |>
     dplyr::filter(
       IdProyecto == !!id_proyecto,
-      Cargo == "Coordinador de Brigada"
+      Cargo == !!cargo_coordinador
     ) |>
     dplyr::select(Id, Num, Nombre, APaterno, AMaterno, Status) |>
     dplyr::collect() |>
@@ -412,6 +412,10 @@ resolver_brigada_en_fecha <- function(actividad, usuario_log, usuarios_cat, num_
 #' @param filtro_minimo_actividad Function. Filtros preliminares en SQL.
 #' @param normalizador_actividad Function. Ajustes de tipos posteriores a la descarga.
 #' @param postprocess_insumos Function. Hook (Callback) opcional para inyectar reglas de negocio específicas del proyecto al objeto final.
+#' @param cargo_coordinador Character. Valor exacto del campo `Cargo` en la tabla
+#'   `Usuarios` que identifica a los coordinadores de brigada. Varía por proyecto
+#'   (ej. `"Coordinador de Brigada"`, `"Coordinador"`, `"Supervisor"`).
+#'   Por defecto `"Coordinador de Brigada"`.
 #'
 #' @return Una lista estructurada (`insumos`) con los dataframes listos para reporteo.
 #' @importFrom lubridate as_datetime with_tz as_date
@@ -426,11 +430,12 @@ cargar_insumos <- function(
   fecha_min_actividad = NULL,
   filtro_minimo_actividad = NULL,
   normalizador_actividad = NULL,
-  postprocess_insumos = NULL
+  postprocess_insumos = NULL,
+  cargo_coordinador = "Coordinador de Brigada"
 ) {
   usuarios_asignados  <- cargar_usuarios_asignados(pool, fuentes_actividad)
-  usuarios_cat        <- cargar_usuarios_cat(pool, id_proyecto, usuarios_asignados)
-  coordinadores_cat   <- cargar_coordinadores_cat(pool, id_proyecto)
+  usuarios_cat        <- cargar_usuarios_cat(pool, id_proyecto, usuarios_asignados, cargo_coordinador)
+  coordinadores_cat   <- cargar_coordinadores_cat(pool, id_proyecto, cargo_coordinador)
   brigadas_cat        <- cargar_brigadas_cat(pool, id_proyecto)
   municipios_cat      <- cargar_municipios_cat(pool)
   usuario_log         <- cargar_usuario_log(pool, id_proyecto)
