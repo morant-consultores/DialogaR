@@ -14,7 +14,8 @@ cargar_insumos(
   fecha_min_actividad = NULL,
   filtro_minimo_actividad = NULL,
   normalizador_actividad = NULL,
-  postprocess_insumos = NULL
+  postprocess_insumos = NULL,
+  cargo_coordinador = "Coordinador de Brigada"
 )
 }
 \arguments{
@@ -37,6 +38,11 @@ cargar_insumos(
 \item{normalizador_actividad}{Function. Ajustes de tipos posteriores a la descarga.}
 
 \item{postprocess_insumos}{Function. Hook (Callback) opcional para inyectar reglas de negocio específicas del proyecto al objeto final.}
+
+\item{cargo_coordinador}{Character. Valor exacto del campo \code{Cargo} en la tabla
+\code{Usuarios} que identifica a los coordinadores de brigada. Varía por proyecto
+(ej. \code{"Coordinador de Brigada"}, \code{"Coordinador"}, \code{"Supervisor"}).
+Por defecto \code{"Coordinador de Brigada"}.}
 }
 \value{
 Una lista estructurada (\code{insumos}) con los dataframes listos para reporteo.

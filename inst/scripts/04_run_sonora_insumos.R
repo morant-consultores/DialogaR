@@ -192,7 +192,8 @@ bd_completa <- insumos$bd_actividad |>
   parches_bd() |>
   resolver_brigada_en_fecha(
     usuario_log = insumos$cat$usuario_log,
-    usuarios_cat = insumos$cat$usuarios
+    usuarios_cat = insumos$cat$usuarios,
+    num_map = insumos$cat$num_map
   )
 
 bd_aux <- insumos$bd_aux
