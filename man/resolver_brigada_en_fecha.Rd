@@ -4,7 +4,7 @@
 \alias{resolver_brigada_en_fecha}
 \title{Resolver brigada histórica al momento de cada registro de actividad}
 \usage{
-resolver_brigada_en_fecha(actividad, usuario_log, usuarios_cat)
+resolver_brigada_en_fecha(actividad, usuario_log, usuarios_cat, num_map = NULL)
 }
 \arguments{
 \item{actividad}{Data frame con al menos las columnas \code{usuario_num} (character)
@@ -14,7 +14,14 @@ y \code{fecha} (Date).}
 disponible en \code{insumos$cat$usuario_log}.}
 
 \item{usuarios_cat}{Data frame producido por \code{cargar_usuarios_cat()};
-disponible en \code{insumos$cat$usuarios}. Mapea \code{num} → \code{id_usuario}.}
+disponible en \code{insumos$cat$usuarios}. Mapea \code{num} → \code{id_usuario}.
+Solo se usa si \code{num_map} es \code{NULL}.}
+
+\item{num_map}{Data frame opcional con columnas \code{id_usuario} (integer) y
+\code{num} (character) que cubre \strong{todos} los usuarios del proyecto, incluyendo
+los dados de baja en \code{UsuariosEncuesta}. Disponible en
+\code{insumos$cat$num_map}. Si se omite, se deriva de \code{usuarios_cat} (comportamiento
+anterior, que excluye usuarios con \code{Activo = FALSE}).}
 }
 \value{
 \code{actividad} con la columna \code{id_brigada} (integer) resuelta
