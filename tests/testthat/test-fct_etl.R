@@ -606,6 +606,45 @@ test_that("construir_bd_aux: usuario sin match en usuarios_cat tiene vocero NA",
   expect_true(any(is.na(result$vocero)))
 })
 
+test_that("construir_bd_aux: distrito NA cuando nombres de brigada no siguen patron DD", {
+  ec <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 100L)
+  result <- construir_bd_aux(ec, ucat_bd, ccat_bd, bcat_bd, mcat_bd)
+  # bcat_bd tiene "BRIGADA NORTE" / "BRIGADA SUR" — sin prefijo numérico
+  expect_true(all(is.na(result$distrito)))
+})
+
+test_that("construir_bd_aux: distrito extraido cuando todos los nombres de brigada empiezan con DD", {
+  bcat_con_distrito <- dplyr::tibble(
+    id_brigada              = c(100L, 200L),
+    nombre_brigada          = c("01 BRIGADA NORTE", "02 BRIGADA SUR"),
+    activo_brigada          = c(TRUE, TRUE),
+    id_zona_trabajo_brigada = c(1L, 1L),
+    id_usuario_brigada      = c(2L, NA_integer_)
+  )
+  ec <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 100L)
+  result <- construir_bd_aux(ec, ucat_bd, ccat_bd, bcat_con_distrito, mcat_bd)
+  expect_false(any(is.na(result$distrito)))
+  expect_true(all(result$distrito %in% c("01", "02")))
+})
+
+test_that("construir_bd_aux: distrito parcial cuando solo algunas brigadas siguen el patron DD", {
+  bcat_mixto <- dplyr::tibble(
+    id_brigada              = c(100L, 200L),
+    nombre_brigada          = c("01 BRIGADA NORTE", "BRIGADA SUR"),  # mixto
+    activo_brigada          = c(TRUE, TRUE),
+    id_zona_trabajo_brigada = c(1L, 1L),
+    id_usuario_brigada      = c(2L, NA_integer_)
+  )
+  # Al menos una brigada tiene prefijo DD → usar_distrito TRUE.
+  # "01 BRIGADA NORTE" → distrito "01"; "BRIGADA SUR" → NA.
+  ec <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 200L)
+  result <- suppressWarnings(construir_bd_aux(ec, ucat_bd, ccat_bd, bcat_mixto, mcat_bd))
+  expect_true(any(!is.na(result$distrito)))
+  expect_true(any(is.na(result$distrito)))
+  expect_equal(result$distrito[result$nombre_brigada == "01 BRIGADA NORTE"], "01")
+  expect_true(is.na(result$distrito[result$nombre_brigada == "BRIGADA SUR"]))
+})
+
 test_that("procesar_pase_lista skips records with invalid JSON", {
   registros_mock <- tibble::tibble(
     Id = c(1L, 2L),

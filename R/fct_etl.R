@@ -294,7 +294,7 @@ construir_bd_aux <- function(
     dplyr::filter(!(es_espuria & !(id_usuario %in% ids_reales))) |>
     dplyr::select(-id_brigada_coord, -es_espuria)
 
-  estructura_limpia |>
+  bd <- estructura_limpia |>
     dplyr::left_join(municipios_cat, by = "id_municipio") |>
     dplyr::left_join(brigadas_cat,   by = "id_brigada") |>
     dplyr::left_join(
@@ -307,9 +307,24 @@ construir_bd_aux <- function(
         ),
       by = "id_usuario"
     ) |>
-    dplyr::left_join(coordinadores_cat, by = "id_supervisor") |>
+    dplyr::left_join(coordinadores_cat, by = "id_supervisor")
+
+  # Detectar si nombre_brigada codifica el distrito (formato "DD texto").
+  # Condición: al menos UNA brigada no-NA comienza con dos dígitos.
+  # Las brigadas sin prefijo numérico quedan con distrito NA.
+  # Solo cuando NINGUNA brigada tiene prefijo numérico se omite la extracción.
+  brigadas_unicas <- unique(bd$nombre_brigada)
+  brigadas_unicas <- brigadas_unicas[!is.na(brigadas_unicas)]
+  usar_distrito   <- length(brigadas_unicas) > 0L &&
+    any(grepl("^[0-9]{2}", brigadas_unicas))
+
+  bd |>
     dplyr::transmute(
-      distrito           = NA_character_,
+      distrito = if (usar_distrito) {
+        stringr::str_extract(nombre_brigada, "^[0-9]{2}")
+      } else {
+        NA_character_
+      },
       municipio          = municipio_log,
       nombre_brigada,
       nombre_coordinador,
