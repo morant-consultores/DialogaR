@@ -379,7 +379,9 @@ resolver_brigada_en_fecha <- function(actividad, usuario_log, usuarios_cat, num_
       id_brigada = IdBrigada
     ) |>
     dplyr::inner_join(num_map, by = "id_usuario") |>
-    dplyr::select(num, fecha_evento, id_brigada)
+    dplyr::select(num, fecha_evento, id_brigada) |>
+    dplyr::arrange(num, fecha_evento, dplyr::desc(!is.na(id_brigada))) |>
+    dplyr::distinct(num, fecha_evento, .keep_all = TRUE)
 
   actividad |>
     dplyr::select(-dplyr::any_of("id_brigada")) |>

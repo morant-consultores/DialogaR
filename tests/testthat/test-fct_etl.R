@@ -493,6 +493,43 @@ test_that("resolver_brigada_en_fecha: num_map amplio resuelve usuario ausente de
   expect_equal(result_con$id_brigada, 400L)
 })
 
+test_that("resolver_brigada_en_fecha: num con dos id_usuario distintos no duplica actividad ni produce NA si uno tiene brigada", {
+  # Escenario: el mismo num ("003") aparece con dos id_usuario (3 y 4) en num_map
+  # (usuario re-registrado). En la misma fecha, uno tiene IdBrigada=84 y el otro NA.
+  # La actividad debe resolverse a 84, sin duplicar filas.
+  log_duplicado <- dplyr::bind_rows(
+    make_usuario_log(),
+    dplyr::tibble(
+      IdHistorico    = c(50L, 51L),
+      IdUsuario      = c(3L, 4L),
+      IdCargo        = c(1L, 1L),
+      IdEstado       = c(1L, 1L),
+      IdMunicipio    = c(1L, 1L),
+      IdZonaDeTabajo = c(1L, 1L),
+      IdSupervisor   = c(99L, 99L),
+      IdBrigada      = c(84L, NA_integer_),
+      FechaInsert    = as.POSIXct(c("2026-04-12 08:00:00", "2026-04-12 09:00:00"), tz = "UTC"),
+      ts_evento      = as.POSIXct(c("2026-04-12 08:00:00", "2026-04-12 09:00:00"), tz = "America/Mexico_City"),
+      fecha_evento   = as.Date(c("2026-04-12", "2026-04-12"))
+    )
+  )
+
+  actividad <- dplyr::tibble(
+    usuario_num = "003",
+    fecha       = as.Date("2026-04-13")
+  )
+
+  num_map_dup <- dplyr::tibble(
+    id_usuario = c(1L, 2L, 3L, 4L),
+    num        = c("001", "002", "003", "003")  # id 3 e id 4 comparten num
+  )
+
+  result <- resolver_brigada_en_fecha(actividad, log_duplicado, make_usuarios_cat(), num_map = num_map_dup)
+
+  expect_equal(nrow(result), 1L)
+  expect_equal(result$id_brigada, 84L)
+})
+
 # =========================================================================
 # TESTS: construir_bd_aux — validación relación coordinador–brigada
 # =========================================================================
