@@ -805,22 +805,24 @@ generar_tablas_reporte <- function(bd_prod) {
 
   general <- base_resumen |>
     summarise(
-      nivel   = "General",
-      nombre  = "TOTAL",
-      usuarios = sum(dialogos_efectivos_nube > 0, na.rm = TRUE),
-      dialogos = sum(dialogos_efectivos_nube, na.rm = TRUE),
-      .groups = "drop"
+      nivel     = "General",
+      nombre    = "TOTAL",
+      municipio = NA_character_,
+      usuarios  = sum(dialogos_efectivos_nube > 0, na.rm = TRUE),
+      dialogos  = sum(dialogos_efectivos_nube, na.rm = TRUE),
+      .groups   = "drop"
     ) |>
     mutate(promedio = round(dialogos / if_else(usuarios == 0, NA_real_, usuarios), 2))
 
   por_brigada <- base_resumen |>
     group_by(nombre_brigada) |>
     summarise(
-      nivel   = "Brigada",
-      nombre  = first(nombre_brigada),
-      usuarios = sum(dialogos_efectivos_nube > 0, na.rm = TRUE),
-      dialogos = sum(dialogos_efectivos_nube, na.rm = TRUE),
-      .groups = "drop"
+      nivel     = "Brigada",
+      nombre    = first(nombre_brigada),
+      municipio = first(municipio),
+      usuarios  = sum(dialogos_efectivos_nube > 0, na.rm = TRUE),
+      dialogos  = sum(dialogos_efectivos_nube, na.rm = TRUE),
+      .groups   = "drop"
     )
 
   brigadas_huerfanas <- por_brigada |>

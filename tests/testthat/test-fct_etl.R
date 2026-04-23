@@ -392,6 +392,48 @@ test_that("resolver_brigada_en_fecha: output row count always equals input row c
   expect_equal(nrow(result), nrow(actividad))
 })
 
+test_that("resolver_brigada_en_fecha: num_map amplio resuelve usuario ausente de usuarios_cat", {
+  # Escenario: usuario "003" (id=3) tiene actividad y aparece en usuario_log,
+  # pero NO está en usuarios_cat (ej. Activo=FALSE en UsuariosEncuesta).
+  # Sin num_map → id_brigada=NA. Con num_map que incluye id=3 → brigada resuelta.
+  log_con_inactivo <- dplyr::bind_rows(
+    make_usuario_log(),
+    dplyr::tibble(
+      IdHistorico    = 50L,
+      IdUsuario      = 3L,
+      IdCargo        = 1L,
+      IdEstado       = 1L,
+      IdMunicipio    = 1L,
+      IdZonaDeTabajo = 1L,
+      IdSupervisor   = 99L,
+      IdBrigada      = 400L,
+      FechaInsert    = as.POSIXct("2026-01-10 00:00:00", tz = "UTC"),
+      ts_evento      = as.POSIXct("2026-01-10 00:00:00", tz = "America/Mexico_City"),
+      fecha_evento   = as.Date("2026-01-10")
+    )
+  )
+
+  actividad <- dplyr::tibble(
+    usuario_num = "003",
+    fecha       = as.Date("2026-02-01")
+  )
+
+  # Sin num_map: usuario no está en usuarios_cat → NA
+  result_sin <- resolver_brigada_en_fecha(actividad, log_con_inactivo, make_usuarios_cat())
+  expect_true(is.na(result_sin$id_brigada))
+
+  # Con num_map amplio que incluye id=3 → brigada resuelta
+  num_map_amplio <- dplyr::tibble(
+    id_usuario = c(1L, 2L, 3L),
+    num        = c("001", "002", "003")
+  )
+  result_con <- resolver_brigada_en_fecha(
+    actividad, log_con_inactivo, make_usuarios_cat(),
+    num_map = num_map_amplio
+  )
+  expect_equal(result_con$id_brigada, 400L)
+})
+
 # =========================================================================
 # TESTS: construir_bd_aux — validación relación coordinador–brigada
 # =========================================================================
@@ -430,10 +472,17 @@ bcat_bd <- dplyr::tibble(
 
 mcat_bd <- dplyr::tibble(id_municipio = 1L, municipio_log = "Centro")
 
+ccat_bd <- dplyr::tibble(
+  id_supervisor      = 2L,
+  supervisor         = "002",
+  nombre_coordinador = "CARLOS SOTO",
+  status_coord       = TRUE
+)
+
 test_that("construir_bd_aux: brigadas coincidentes no generan advertencia ni excluyen filas", {
   ec <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 100L)
   expect_no_warning(
-    result <- construir_bd_aux(ec, ucat_bd, bcat_bd, mcat_bd)
+    result <- construir_bd_aux(ec, ucat_bd, ccat_bd, bcat_bd, mcat_bd)
   )
   expect_equal(nrow(result), 2L)
 })
@@ -441,7 +490,7 @@ test_that("construir_bd_aux: brigadas coincidentes no generan advertencia ni exc
 test_that("construir_bd_aux: brigadas distintas emiten advertencia con 'espuria'", {
   ec <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 200L)
   expect_warning(
-    construir_bd_aux(ec, ucat_bd, bcat_bd, mcat_bd),
+    construir_bd_aux(ec, ucat_bd, ccat_bd, bcat_bd, mcat_bd),
     regexp = "espuria"
   )
 })
@@ -449,7 +498,7 @@ test_that("construir_bd_aux: brigadas distintas emiten advertencia con 'espuria'
 test_that("construir_bd_aux: relación espuria emite alerta pero conserva todas las filas", {
   ec <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 200L)
   result <- suppressWarnings(
-    construir_bd_aux(ec, ucat_bd, bcat_bd, mcat_bd)
+    construir_bd_aux(ec, ucat_bd, ccat_bd, bcat_bd, mcat_bd)
   )
   # La alerta se emite pero no se excluye ningún vocero: perder filas de bd_aux
   # significa perder actividad operativa en todos los reportes posteriores.
@@ -460,7 +509,7 @@ test_that("construir_bd_aux: la advertencia menciona el num del coordinador y la
   ec <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 200L)
   w <- tryCatch(
     withCallingHandlers(
-      construir_bd_aux(ec, ucat_bd, bcat_bd, mcat_bd),
+      construir_bd_aux(ec, ucat_bd, ccat_bd, bcat_bd, mcat_bd),
       warning = function(w) { invokeRestart("muffleWarning") }
     ),
     warning = identity
@@ -468,7 +517,7 @@ test_that("construir_bd_aux: la advertencia menciona el num del coordinador y la
   # Capturar el mensaje de advertencia para inspeccionarlo
   msgs <- tryCatch(
     withCallingHandlers(
-      construir_bd_aux(ec, ucat_bd, bcat_bd, mcat_bd),
+      construir_bd_aux(ec, ucat_bd, ccat_bd, bcat_bd, mcat_bd),
       warning = function(w) {
         msg <<- conditionMessage(w)
         invokeRestart("muffleWarning")
@@ -494,7 +543,7 @@ test_that("construir_bd_aux: espuria sin vocero real (slot vacío) es eliminada"
     ts_evento     = as.POSIXct(c("2026-01-15", "2026-01-15"), tz = "UTC"),
     fecha_evento  = as.Date(c("2026-01-15", "2026-01-15"))
   )
-  result <- suppressWarnings(construir_bd_aux(ec_vacio, ucat_bd, bcat_bd, mcat_bd))
+  result <- suppressWarnings(construir_bd_aux(ec_vacio, ucat_bd, ccat_bd, bcat_bd, mcat_bd))
   # Solo debe quedar la fila del coordinador en su brigada real; el slot vacío espurio se elimina
   expect_equal(nrow(result), 1L)
   expect_equal(result$vocero[[1]], "002")
@@ -505,7 +554,7 @@ test_that("construir_bd_aux: espuria CON vocero real conserva la fila del vocero
   # Contraste: si el slot espurio SÍ tiene un vocero real (id_usuario existe en ucat_bd),
   # la fila se conserva para no perder su actividad operativa.
   ec_con_vocero <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 200L)
-  result <- suppressWarnings(construir_bd_aux(ec_con_vocero, ucat_bd, bcat_bd, mcat_bd))
+  result <- suppressWarnings(construir_bd_aux(ec_con_vocero, ucat_bd, ccat_bd, bcat_bd, mcat_bd))
   expect_equal(nrow(result), 2L)
   expect_true("001" %in% result$vocero)
 })
