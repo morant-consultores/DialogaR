@@ -385,14 +385,15 @@ resolver_brigada_en_fecha <- function(actividad, usuario_log, usuarios_cat, num_
 
   actividad |>
     dplyr::select(-dplyr::any_of("id_brigada")) |>
+    dplyr::mutate(.row = dplyr::row_number()) |>
     dplyr::left_join(
       brigada_hist,
-      dplyr::join_by(
-        usuario_num == num,
-        dplyr::closest(fecha >= fecha_evento)
-      )
+      dplyr::join_by(usuario_num == num, fecha >= fecha_evento)
     ) |>
-    dplyr::select(-fecha_evento)
+    dplyr::group_by(.row) |>
+    dplyr::slice_max(fecha_evento, n = 1, with_ties = FALSE) |>
+    dplyr::ungroup() |>
+    dplyr::select(-.row, -fecha_evento)
 }
 
 # ---- 3) Orquestador Principal (Exportado) -------------------------------
