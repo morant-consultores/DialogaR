@@ -309,6 +309,49 @@ construir_bd_aux <- function(
     ) |>
     dplyr::left_join(coordinadores_cat, by = "id_supervisor")
 
+  # Detectar brigadas donde IdSupervisor no fue registrado en UsuarioLog pero
+  # existe un coordinador asignado a esa brigada en el catálogo de usuarios.
+  # Causa probable: omisión en la plataforma (no es un problema de datos propios).
+  coord_por_brigada <- usuarios_cat |>
+    dplyr::filter(id_usuario %in% coordinadores_cat$id_supervisor) |>
+    dplyr::select(id_brigada, id_coord = id_usuario) |>
+    dplyr::inner_join(
+      coordinadores_cat |> dplyr::select(id_supervisor, nombre_coordinador),
+      by = c("id_coord" = "id_supervisor")
+    )
+
+  brigadas_sin_supervisor <- bd |>
+    dplyr::filter(is.na(nombre_coordinador), !is.na(id_brigada)) |>
+    dplyr::distinct(id_brigada, nombre_brigada) |>
+    dplyr::inner_join(coord_por_brigada, by = "id_brigada")
+
+  if (nrow(brigadas_sin_supervisor) > 0) {
+    n_voceros_afectados <- bd |>
+      dplyr::filter(
+        id_brigada %in% brigadas_sin_supervisor$id_brigada,
+        !is.na(vocero),
+        is.na(nombre_coordinador)
+      ) |>
+      nrow()
+
+    lineas <- brigadas_sin_supervisor |>
+      dplyr::transmute(msg = sprintf(
+        "Brigada '%s' — coordinador en cat\u00e1logo: %s (id: %d)",
+        nombre_brigada, nombre_coordinador, id_coord
+      )) |>
+      dplyr::pull(msg)
+
+    cli::cli_warn(c(
+      "!" = sprintf(
+        "construir_bd_aux: %d brigada(s) con coordinador en cat\u00e1logo pero sin IdSupervisor en UsuarioLog (%d vocero(s) afectado(s)).",
+        nrow(brigadas_sin_supervisor), n_voceros_afectados
+      ),
+      " " = "Causa: IdSupervisor no fue registrado en la plataforma para estos voceros.",
+      " " = "Acci\u00f3n: actualizar IdSupervisor en la plataforma.",
+      stats::setNames(lineas, rep("*", length(lineas)))
+    ))
+  }
+
   # Detectar si nombre_brigada codifica el distrito (formato "DD texto").
   # Condición: al menos UNA brigada no-NA comienza con dos dígitos.
   # Las brigadas sin prefijo numérico quedan con distrito NA.

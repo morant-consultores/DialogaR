@@ -765,7 +765,7 @@ generar_reporte_productividad <- function(
     char_default = char_default,
     num_default = num_default
   ) |>
-    filter(nombre_coordinador != "-" | dialogos_efectivos_nube > 0)
+    filter(nombre_coordinador != "-" | dialogos_efectivos_nube > 0 | viviendas_visitadas_nube > 0)
 
   list(
     corte = corte,
