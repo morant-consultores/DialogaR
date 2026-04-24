@@ -783,3 +783,177 @@ procesar_pase_lista <- function(
 
   as_tibble(pl[])
 }
+
+
+#' Inferir coordinador desde brigada para voceros sin IdSupervisor en UsuarioLog
+#'
+#' @description
+#' Hook auxiliar diseñado para usarse dentro de `postprocess_insumos`. Cuando
+#' `construir_bd_aux` emite un warning por brigadas sin `IdSupervisor` registrado
+#' en la plataforma, esta función intenta poblar los campos de coordinador
+#' (`nombre_coordinador`, `supervisor`, `status_coord`) usando la relación
+#' brigada → coordinador del catálogo de usuarios.
+#'
+#' La inferencia es **unívoca** cuando hay exactamente un coordinador activo por
+#' brigada. Si hay más de uno, la fila se deja intacta y se emite un warning
+#' para resolución manual.
+#'
+#' @details
+#' Esta función **no reemplaza** la corrección en plataforma. Es una mitigación
+#' explícita y opt-in para proyectos donde se sabe que `IdSupervisor` no se
+#' popula correctamente. Debe llamarse en el hook `postprocess_insumos` del
+#' script de proyecto:
+#'
+#' ```r
+#' cargo_coordinador <- "Jefe de Brigada"   # ajustar por proyecto
+#'
+#' cargar_insumos(
+#'   ...,
+#'   cargo_coordinador = cargo_coordinador,
+#'   postprocess_insumos = function(insumos) {
+#'     inferir_coordinador_desde_brigada(insumos, cargo_coordinador = cargo_coordinador)
+#'   }
+#' )
+#' ```
+#'
+#' @param insumos Lista producida por `cargar_insumos()`.
+#' @param cargo_coordinador Valor del campo `cargo` que identifica coordinadores
+#'   en `insumos$cat$usuarios`. Debe coincidir con el valor usado en `cargar_insumos()`.
+#' @param on_ambiguo Qué hacer cuando una brigada tiene más de un coordinador:
+#'   - `"warn_skip"` (default): emite warning y deja la fila sin modificar.
+#'   - `"error"`: aborta con un error explícito.
+#'
+#' @return `insumos` con `bd_aux` parcheado donde la inferencia fue unívoca.
+#'
+#' @section Seguridad y Privacidad:
+#' Nivel de datos: INTERNO (estructura operativa, sin PII de encuestados).
+#' Control ISO 27001: A.8.2 (Clasificación de información).
+#'
+#' @export
+inferir_coordinador_desde_brigada <- function(
+  insumos,
+  cargo_coordinador = "Coordinador de Brigada",
+  on_ambiguo = c("warn_skip", "error")
+) {
+  on_ambiguo <- match.arg(on_ambiguo)
+
+  bd_aux       <- insumos$bd_aux
+  usuarios_cat <- insumos$cat$usuarios
+  brigadas_cat <- insumos$cat$brigadas
+
+  # Filas candidatas: voceros sin coordinador asignado, con brigada conocida
+  candidatos <- bd_aux |>
+    dplyr::filter(is.na(nombre_coordinador), !is.na(nombre_brigada), nombre_brigada != "-") |>
+    dplyr::distinct(nombre_brigada)
+
+  if (nrow(candidatos) == 0) {
+    return(insumos)
+  }
+
+  # Mapa brigada → coordinador desde el catálogo
+  coord_brigada <- usuarios_cat |>
+    dplyr::filter(
+      toupper(cargo) == toupper(cargo_coordinador),
+      !is.na(id_brigada)
+    ) |>
+    dplyr::left_join(
+      brigadas_cat |> dplyr::select(id_brigada, nombre_brigada),
+      by = "id_brigada"
+    ) |>
+    dplyr::filter(!is.na(nombre_brigada)) |>
+    dplyr::transmute(
+      nombre_brigada,
+      supervisor_inf      = num,
+      nombre_coord_inf    = nombre_completo,
+      status_coord_inf    = status
+    )
+
+  # Detectar ambigüedad: brigadas con más de un coordinador en catálogo
+  conteo <- coord_brigada |>
+    dplyr::count(nombre_brigada, name = "n_coords")
+
+  ambiguas <- conteo |> dplyr::filter(n_coords > 1)
+
+  if (nrow(ambiguas) > 0) {
+    detalle <- ambiguas |>
+      dplyr::left_join(
+        coord_brigada |> dplyr::group_by(nombre_brigada) |>
+          dplyr::summarise(
+            coords = paste(nombre_coord_inf, collapse = ", "),
+            .groups = "drop"
+          ),
+        by = "nombre_brigada"
+      ) |>
+      dplyr::transmute(msg = sprintf(
+        "Brigada '%s': %d coordinadores (%s)",
+        nombre_brigada, n_coords, coords
+      )) |>
+      dplyr::pull(msg)
+
+    msg <- sprintf(
+      "inferir_coordinador_desde_brigada: %d brigada(s) amb\u00f3gua(s) (m\u00e1s de un coordinador en cat\u00e1logo). No se infiere para estas brigadas.",
+      nrow(ambiguas)
+    )
+
+    if (on_ambiguo == "error") {
+      stop(paste(c(msg, detalle), collapse = "\n  "))
+    } else {
+      cli::cli_warn(c(
+        "!" = msg,
+        " " = "Resuelve manualmente en el hook postprocess_insumos.",
+        stats::setNames(detalle, rep("*", length(detalle)))
+      ))
+    }
+  }
+
+  # Solo inferir donde la relación es unívoca
+  coord_univoca <- coord_brigada |>
+    dplyr::semi_join(conteo |> dplyr::filter(n_coords == 1), by = "nombre_brigada")
+
+  # Intersección: brigadas candidatas con inferencia posible
+  a_parchear <- candidatos |>
+    dplyr::inner_join(coord_univoca, by = "nombre_brigada")
+
+  if (nrow(a_parchear) == 0) {
+    return(insumos)
+  }
+
+  # Parchear bd_aux: solo filas candidatas con brigada unívoca
+  bd_aux_parcheada <- bd_aux |>
+    dplyr::left_join(a_parchear, by = "nombre_brigada") |>
+    dplyr::mutate(
+      nombre_coordinador = dplyr::if_else(
+        is.na(nombre_coordinador) & !is.na(nombre_coord_inf),
+        nombre_coord_inf,
+        nombre_coordinador
+      ),
+      supervisor = dplyr::if_else(
+        is.na(supervisor) & !is.na(supervisor_inf),
+        supervisor_inf,
+        supervisor
+      ),
+      status_coord = dplyr::if_else(
+        is.na(status_coord) & !is.na(status_coord_inf),
+        status_coord_inf,
+        status_coord
+      )
+    ) |>
+    dplyr::select(-supervisor_inf, -nombre_coord_inf, -status_coord_inf)
+
+  n_parcheados <- bd_aux_parcheada |>
+    dplyr::filter(
+      nombre_brigada %in% a_parchear$nombre_brigada,
+      !is.na(nombre_coordinador)
+    ) |>
+    nrow()
+
+  cli::cli_inform(c(
+    "v" = sprintf(
+      "inferir_coordinador_desde_brigada: coordinador inferido para %d brigada(s), %d vocero(s) actualizados.",
+      nrow(a_parchear), n_parcheados
+    )
+  ))
+
+  insumos$bd_aux <- bd_aux_parcheada
+  insumos
+}
