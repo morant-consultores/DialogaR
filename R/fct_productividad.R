@@ -37,23 +37,12 @@ normalizar_faltantes_reporte <- function(
 }
 
 ordenar_reporte <- function(df) {
-  has_distrito <- "distrito" %in% names(df)
-  if (has_distrito) {
-    df |>
-      dplyr::arrange(
-        suppressWarnings(as.numeric(distrito)),
-        municipio,
-        nombre_brigada,
-        nombre_vocero
-      )
-  } else {
-    df |>
-      dplyr::arrange(
-        municipio,
-        nombre_brigada,
-        nombre_vocero
-      )
-  }
+  has_dialogos <- "dialogos_efectivos_nube" %in% names(df)
+  df |>
+    dplyr::arrange(
+      nombre_brigada,
+      if (has_dialogos) dplyr::desc(dialogos_efectivos_nube) else NULL
+    )
 }
 
 # Helper: coerción numérica heurística (sin hardcodear columnas).

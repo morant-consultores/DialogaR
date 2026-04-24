@@ -24,6 +24,7 @@ library(sf)
 
 corte <- Sys.Date() - 1
 id_proyecto <- 26L
+cargo_coordinador <- "Coordinador de Brigada"
 
 # Carpeta de Drive con archivos de referencia del proyecto
 drive_folder <- as_id(
@@ -173,7 +174,10 @@ insumos <- cargar_insumos(
   fecha_min_actividad = fecha_min_actividad,
   filtro_minimo_actividad = filtro_minimo_actividad,
   normalizador_actividad = normalizador_actividad,
-  postprocess_insumos = NULL
+  cargo_coordinador = cargo_coordinador,
+  postprocess_insumos = function(insumos) {
+    inferir_coordinador_desde_brigada(insumos, cargo_coordinador = cargo_coordinador)
+  }
 )
 
 cli::cli_alert_success(
