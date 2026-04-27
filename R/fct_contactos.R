@@ -124,7 +124,8 @@ construir_base_contactos <- function(
     dplyr::filter(activo_brigada == TRUE) |>
     dplyr::left_join(
       voceros |>
-        dplyr::filter(cargo == cargo_coordinador, status == TRUE),
+        dplyr::filter(cargo == cargo_coordinador, status == TRUE) |>
+        dplyr::select(-dplyr::any_of("nombre_brigada")),
       by = "id_brigada"
     ) |>
     dplyr::select(nombre_brigada, id_brigada)
