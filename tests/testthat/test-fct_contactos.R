@@ -4,34 +4,12 @@
 # Fixtures
 # ------------------------------------------------------------
 
-make_voceros <- function() {
+make_bd_aux <- function() {
   tibble::tibble(
-    num            = c(1L, 2L, 3L),
-    nombre_completo = c("Ana López", "Carlos Pérez", "María García"),
-    cargo          = c("Vocero", "Coordinador de Brigada", "Vocero"),
-    status         = c(TRUE, TRUE, TRUE),
-    id_brigada     = c(10L, 10L, 20L)
+    vocero             = c(1L, 2L, 3L),
+    nombre_vocero      = c("Ana Lopez", "Carlos Perez", NA_character_),
+    nombre_coordinador = c("Coord Norte", "Coord Norte", "Coord Sur")
   )
-}
-
-make_brigadas <- function() {
-  tibble::tibble(
-    activo_brigada = c(TRUE, TRUE),
-    id_brigada     = c(10L, 20L),
-    nombre_brigada = c("Brigada Norte", "Brigada Sur")
-  )
-}
-
-make_coordinadores <- function() {
-  tibble::tibble(
-    status_coord       = c(TRUE, TRUE),
-    nombre_brigada     = c("Brigada Norte", "Brigada Sur"),
-    nombre_coordinador = c("Coord Norte", "Coord Sur")
-  )
-}
-
-make_aux_zonas <- function() {
-  tibble::tibble(seccion = c("0001", "0002", "0003"))
 }
 
 make_bd_completa <- function(
@@ -79,13 +57,10 @@ make_bd_completa <- function(
 
 test_that("construir_base_contactos devuelve df con columnas esperadas (cols dinámicas)", {
   res <- construir_base_contactos(
-    personaje      = garcia,
-    bd_completa    = make_bd_completa(),
-    corte          = as.Date("2026-03-31"),
-    voceros        = make_voceros(),
-    brigadas       = make_brigadas(),
-    coordinadores  = make_coordinadores(),
-    aux_zonas      = make_aux_zonas()
+    personaje   = garcia,
+    bd_completa = make_bd_completa(),
+    corte       = as.Date("2026-03-31"),
+    bd_aux      = make_bd_aux()
   )
 
   expect_s3_class(res, "data.frame")
@@ -100,13 +75,10 @@ test_that("construir_base_contactos devuelve df con columnas esperadas (cols din
 test_that("construir_base_contactos usa columnas genéricas cuando no existen las dinámicas", {
   bd <- make_bd_completa(conoce_col = NULL) # sin columnas dinámicas
   res <- construir_base_contactos(
-    personaje     = lopez,
-    bd_completa   = bd,
-    corte         = as.Date("2026-03-31"),
-    voceros       = make_voceros(),
-    brigadas      = make_brigadas(),
-    coordinadores = make_coordinadores(),
-    aux_zonas     = make_aux_zonas()
+    personaje   = lopez,
+    bd_completa = bd,
+    corte       = as.Date("2026-03-31"),
+    bd_aux      = make_bd_aux()
   )
 
   expect_true("personaje_conocimiento" %in% names(res))
@@ -123,13 +95,10 @@ test_that("construir_base_contactos lanza error si faltan columnas de conocimien
 
   expect_error(
     construir_base_contactos(
-      personaje     = xyz,
-      bd_completa   = bd,
-      corte         = as.Date("2026-03-31"),
-      voceros       = make_voceros(),
-      brigadas      = make_brigadas(),
-      coordinadores = make_coordinadores(),
-      aux_zonas     = make_aux_zonas()
+      personaje   = xyz,
+      bd_completa = bd,
+      corte       = as.Date("2026-03-31"),
+      bd_aux      = make_bd_aux()
     ),
     regexp = "No encontré columnas"
   )
@@ -144,13 +113,10 @@ test_that("construir_base_contactos excluye registros posteriores al corte", {
     fecha_vals = c(as.Date("2026-02-01"), as.Date("2026-04-01"), as.Date("2026-02-15"))
   )
   res <- construir_base_contactos(
-    personaje     = garcia,
-    bd_completa   = bd,
-    corte         = as.Date("2026-03-01"),
-    voceros       = make_voceros(),
-    brigadas      = make_brigadas(),
-    coordinadores = make_coordinadores(),
-    aux_zonas     = make_aux_zonas()
+    personaje   = garcia,
+    bd_completa = bd,
+    corte       = as.Date("2026-03-01"),
+    bd_aux      = make_bd_aux()
   )
 
   expect_true(all(res$fecha <= as.Date("2026-03-01")))
@@ -167,13 +133,10 @@ test_that("construir_base_contactos excluye filas sin celular ni correo", {
     correo_vals  = c(NA_character_, "b@mail.com", NA_character_)
   )
   res <- construir_base_contactos(
-    personaje     = garcia,
-    bd_completa   = bd,
-    corte         = as.Date("2026-03-31"),
-    voceros       = make_voceros(),
-    brigadas      = make_brigadas(),
-    coordinadores = make_coordinadores(),
-    aux_zonas     = make_aux_zonas()
+    personaje   = garcia,
+    bd_completa = bd,
+    corte       = as.Date("2026-03-31"),
+    bd_aux      = make_bd_aux()
   )
 
   # id=3 no tiene ni correo ni celular → excluido
@@ -187,14 +150,11 @@ test_that("construir_base_contactos excluye filas sin celular ni correo", {
 
 test_that("construir_base_contactos no incluye columna partido cuando partido = NULL", {
   res <- construir_base_contactos(
-    personaje     = garcia,
-    partido       = NULL,
-    bd_completa   = make_bd_completa(),
-    corte         = as.Date("2026-03-31"),
-    voceros       = make_voceros(),
-    brigadas      = make_brigadas(),
-    coordinadores = make_coordinadores(),
-    aux_zonas     = make_aux_zonas()
+    personaje   = garcia,
+    partido     = NULL,
+    bd_completa = make_bd_completa(),
+    corte       = as.Date("2026-03-31"),
+    bd_aux      = make_bd_aux()
   )
 
   expect_false("partido" %in% names(res))
@@ -211,10 +171,7 @@ test_that("construir_base_contactos lanza error si clasificacion=TRUE y partido=
       partido       = NULL,
       bd_completa   = make_bd_completa(),
       corte         = as.Date("2026-03-31"),
-      voceros       = make_voceros(),
-      brigadas      = make_brigadas(),
-      coordinadores = make_coordinadores(),
-      aux_zonas     = make_aux_zonas(),
+      bd_aux        = make_bd_aux(),
       clasificacion = TRUE
     ),
     regexp = "clasificacion = TRUE"
@@ -231,10 +188,7 @@ test_that("construir_base_contactos no agrega grupo/categoria si clasificacion=F
     partido       = partido,
     bd_completa   = make_bd_completa(),
     corte         = as.Date("2026-03-31"),
-    voceros       = make_voceros(),
-    brigadas      = make_brigadas(),
-    coordinadores = make_coordinadores(),
-    aux_zonas     = make_aux_zonas(),
+    bd_aux        = make_bd_aux(),
     clasificacion = FALSE
   )
 
@@ -277,10 +231,7 @@ test_that("construir_base_contactos clasifica contactos en los 6 grupos correcta
     partido       = PAN,
     bd_completa   = bd,
     corte         = as.Date("2026-03-31"),
-    voceros       = make_voceros(),
-    brigadas      = make_brigadas(),
-    coordinadores = make_coordinadores(),
-    aux_zonas     = make_aux_zonas(),
+    bd_aux        = make_bd_aux(),
     clasificacion = TRUE
   )
 
@@ -301,13 +252,10 @@ test_that("construir_base_contactos convierte nombres a ASCII mayúsculas", {
   bd$apellido_materno    <- "Ñoño"
 
   res <- construir_base_contactos(
-    personaje     = garcia,
-    bd_completa   = bd,
-    corte         = as.Date("2026-03-31"),
-    voceros       = make_voceros(),
-    brigadas      = make_brigadas(),
-    coordinadores = make_coordinadores(),
-    aux_zonas     = make_aux_zonas()
+    personaje   = garcia,
+    bd_completa = bd,
+    corte       = as.Date("2026-03-31"),
+    bd_aux      = make_bd_aux()
   )
 
   expect_equal(res$nombre, "JOSE GARCIA NONO")
@@ -323,28 +271,22 @@ test_that("construir_base_contactos reemplaza NA de carácter con na_chr", {
   )
 
   res <- construir_base_contactos(
-    personaje     = garcia,
-    bd_completa   = bd,
-    corte         = as.Date("2026-03-31"),
-    voceros       = make_voceros(),
-    brigadas      = make_brigadas(),
-    coordinadores = make_coordinadores(),
-    aux_zonas     = make_aux_zonas(),
-    na_chr        = "-"
+    personaje   = garcia,
+    bd_completa = bd,
+    corte       = as.Date("2026-03-31"),
+    bd_aux      = make_bd_aux(),
+    na_chr      = "-"
   )
 
   # correo del id=1 era NA → debe ser "-"
   expect_equal(res$correo[res$id == 1L], "-")
   # na_chr personalizado
   res2 <- construir_base_contactos(
-    personaje     = garcia,
-    bd_completa   = bd,
-    corte         = as.Date("2026-03-31"),
-    voceros       = make_voceros(),
-    brigadas      = make_brigadas(),
-    coordinadores = make_coordinadores(),
-    aux_zonas     = make_aux_zonas(),
-    na_chr        = "N/D"
+    personaje   = garcia,
+    bd_completa = bd,
+    corte       = as.Date("2026-03-31"),
+    bd_aux      = make_bd_aux(),
+    na_chr      = "N/D"
   )
   expect_equal(res2$correo[res2$id == 1L], "N/D")
 })
@@ -355,13 +297,10 @@ test_that("construir_base_contactos reemplaza NA de carácter con na_chr", {
 
 test_that("construir_base_contactos elimina prefijo 'direccion_' de columnas de dirección", {
   res <- construir_base_contactos(
-    personaje     = garcia,
-    bd_completa   = make_bd_completa(),
-    corte         = as.Date("2026-03-31"),
-    voceros       = make_voceros(),
-    brigadas      = make_brigadas(),
-    coordinadores = make_coordinadores(),
-    aux_zonas     = make_aux_zonas()
+    personaje   = garcia,
+    bd_completa = make_bd_completa(),
+    corte       = as.Date("2026-03-31"),
+    bd_aux      = make_bd_aux()
   )
 
   expect_true("calle"   %in% names(res))
