@@ -541,6 +541,7 @@ cargar_insumos <- function(
   insumos <- list(
     id_proyecto = id_proyecto,
     corte = as.Date(corte),
+    cargo_coordinador = cargo_coordinador,
     bd_actividad = bd_actividad,
     bd_aux = bd_aux,
     pase_lista = pase_lista,
