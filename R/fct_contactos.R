@@ -1,10 +1,9 @@
 #' Construir base de contactos con clasificación estratégica opcional
 #'
-#' Integra los registros de encuesta con el catálogo operativo de voceros,
-#' coordinadores y brigadas, filtra los registros que cuentan con al menos
-#' un medio de contacto (correo o celular) y, opcionalmente, clasifica a
-#' cada contacto según su simpatía de partido y su opinión sobre un personaje
-#' político.
+#' Integra los registros de encuesta con la jerarquía operativa resuelta por
+#' `cargar_insumos()`, filtra los registros que cuentan con al menos un medio
+#' de contacto (correo o celular) y, opcionalmente, clasifica a cada contacto
+#' según su simpatía de partido y su opinión sobre un personaje político.
 #'
 #' @param personaje Nombre (sin comillas) de la variable que identifica al
 #'   personaje político. La función busca las columnas `conoce_<personaje>`
@@ -19,22 +18,14 @@
 #'   domicilio, y las columnas de conocimiento/opinión del personaje.
 #' @param corte Fecha de corte (`Date` o cadena interpretable por R). Solo se
 #'   incluyen registros con `fecha <= corte`.
-#' @param voceros Data frame del catálogo de voceros. Columnas requeridas:
-#'   `num`, `nombre_completo`, `cargo`, `status`, `id_brigada`.
-#' @param brigadas Data frame del catálogo de brigadas. Columnas requeridas:
-#'   `activo_brigada`, `id_brigada`, `nombre_brigada`.
-#' @param coordinadores Data frame del catálogo de coordinadores. Columnas
-#'   requeridas: `status_coord`, `nombre_brigada`, `nombre_coordinador`.
-#' @param aux_zonas Data frame auxiliar de zonas geográficas. Debe contener la
-#'   columna `seccion` para el *join* con la base de encuesta.
+#' @param bd_aux Data frame producido por `cargar_insumos()$bd_aux` con la
+#'   jerarquía vocero → brigada → coordinador resuelta al corte. Columnas
+#'   requeridas: `vocero`, `nombre_vocero`, `nombre_coordinador`.
 #' @param na_chr Cadena usada para rellenar `NA` en columnas de carácter.
 #'   Predeterminado: `"-"`.
 #' @param clasificacion Lógico. Si `TRUE`, añade las columnas `grupo` y
 #'   `categoria` con la clasificación estratégica del contacto. Requiere que
 #'   `partido` no sea `NULL`. Predeterminado: `FALSE`.
-#' @param cargo_coordinador Carácter. Valor del campo `cargo` que identifica
-#'   coordinadores en el catálogo de voceros. Debe coincidir con el valor
-#'   usado en `cargar_insumos()`. Predeterminado: `"Coordinador de Brigada"`.
 #'
 #' @return Data frame con una fila por contacto que tenga correo o celular
 #'   registrado. Incluye columnas de identificación, ubicación, datos de
@@ -55,13 +46,9 @@ construir_base_contactos <- function(
   partido = NULL,
   bd_completa,
   corte,
-  voceros,
-  brigadas,
-  coordinadores,
-  aux_zonas,
+  bd_aux,
   na_chr = "-",
-  clasificacion = FALSE,
-  cargo_coordinador = "Coordinador de Brigada"
+  clasificacion = FALSE
 ) {
   # ------------------------------------------------------------
   # Helpers
@@ -116,50 +103,37 @@ construir_base_contactos <- function(
     )
   }
 
-  # ------------------------------------------------------------
-  # Catálogo de usuarios
-  # ------------------------------------------------------------
-
-  aux_brigadas <- brigadas |>
-    dplyr::filter(activo_brigada == TRUE) |>
-    dplyr::left_join(
-      voceros |>
-        dplyr::filter(cargo == cargo_coordinador, status == TRUE) |>
-        dplyr::select(-dplyr::any_of("nombre_brigada")),
-      by = "id_brigada"
-    ) |>
-    dplyr::select(nombre_brigada, id_brigada)
-
-  aux_coordinadores <- coordinadores |>
-    dplyr::filter(status_coord == TRUE) |>
-    dplyr::left_join(aux_brigadas, by = "nombre_brigada") |>
-    dplyr::mutate(coordinador = norm_ascii(nombre_coordinador))
-
-  cat_usuarios <- voceros |>
-    dplyr::left_join(aux_coordinadores, by = "id_brigada") |>
-    dplyr::mutate(vocero = norm_ascii(nombre_completo))
-
   lbl_partido <- partido_chr
   lbl_person  <- personaje_chr
+
+  # ------------------------------------------------------------
+  # Catálogo de voceros desde bd_aux (jerarquía ya resuelta)
+  # ------------------------------------------------------------
+
+  cat_voceros <- bd_aux |>
+    dplyr::filter(!is.na(vocero)) |>
+    dplyr::distinct(vocero, .keep_all = TRUE) |>
+    dplyr::transmute(
+      vocero,
+      vocero_nombre = dplyr::coalesce(
+        norm_ascii(nombre_vocero),
+        norm_ascii(nombre_coordinador)
+      )
+    )
 
   # ------------------------------------------------------------
   # Procesamiento base
   # ------------------------------------------------------------
 
-  # Materializar antes del transmute para poder rescatar columnas opcionales
   bd_proc <- bd_completa |>
     dplyr::filter(fecha <= corte) |>
-    dplyr::left_join(cat_usuarios, dplyr::join_by(usuario_num == num)) |>
-    dplyr::mutate(
-      seccion = stringr::str_pad(seccion, 4, pad = "0")
-    ) |>
-    dplyr::left_join(aux_zonas, by = "seccion")
+    dplyr::left_join(cat_voceros, dplyr::join_by(usuario_num == vocero))
 
   res <- bd_proc |>
     dplyr::transmute(
       id,
       fecha,
-      vocero             = dplyr::coalesce(vocero, coordinador),
+      vocero             = vocero_nombre,
       usuario_num,
       seccion,
       direccion_calle,

@@ -201,16 +201,9 @@ bd_completa <- insumos$bd_actividad |>
   )
 
 bd_aux <- insumos$bd_aux
-brigadas <- insumos$cat$brigadas
-voceros <- insumos$cat$usuarios
-
-coordinadores <- bd_aux |>
-  dplyr::filter(!is.na(supervisor), supervisor != "-") |>
-  dplyr::distinct(nombre_coordinador, .keep_all = TRUE) |>
-  dplyr::mutate(usuario_num = supervisor)
 
 cli::cli_alert_success(
-  "bd_completa: {nrow(bd_completa)} registros | voceros: {nrow(voceros)} | coordinadores: {nrow(coordinadores)}"
+  "bd_completa: {nrow(bd_completa)} registros | bd_aux: {nrow(bd_aux)} filas"
 )
 
 # =========================================================================
@@ -287,13 +280,6 @@ validar(
   )
 )
 
-validar("voceros", voceros, nrow_min = 1L)
-validar(
-  "coordinadores",
-  coordinadores,
-  nrow_min = 1L,
-  cols_requeridas = c("supervisor", "nombre_coordinador")
-)
 validar("metas", metas, nrow_min = 1L)
 
 pl_287 <- insumos$pase_lista$pl_287

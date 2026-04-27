@@ -7,7 +7,7 @@
 #
 # PRERREQUISITO: Haber ejecutado 04_run_sonora_insumos.R en la misma sesión.
 #   Objetos requeridos en el entorno:
-#     bd_completa, corte, voceros, brigadas, coordinadores, aux_zonas
+#     bd_completa, corte, bd_aux
 # =========================================================================
 
 library(DialogaR)
@@ -20,10 +20,7 @@ library(dplyr)
 prereqs <- c(
   "bd_completa",
   "corte",
-  "voceros",
-  "brigadas",
-  "coordinadores",
-  "aux_zonas"
+  "bd_aux"
 )
 faltantes <- prereqs[!sapply(prereqs, exists)]
 if (length(faltantes) > 0) {
@@ -78,10 +75,7 @@ args_contactos <- list(
   personaje = rlang::sym(personaje_col),
   bd_completa = bd_contactos_raw,
   corte = corte,
-  voceros = voceros,
-  brigadas = brigadas,
-  coordinadores = coordinadores,
-  aux_zonas = aux_zonas,
+  bd_aux = bd_aux,
   clasificacion = usar_clasificacion
 )
 
