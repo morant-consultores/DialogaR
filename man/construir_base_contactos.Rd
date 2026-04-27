@@ -9,10 +9,7 @@ construir_base_contactos(
   partido = NULL,
   bd_completa,
   corte,
-  voceros,
-  brigadas,
-  coordinadores,
-  aux_zonas,
+  bd_aux,
   na_chr = "-",
   clasificacion = FALSE
 )
@@ -35,17 +32,9 @@ domicilio, y las columnas de conocimiento/opinión del personaje.}
 \item{corte}{Fecha de corte (\code{Date} o cadena interpretable por R). Solo se
 incluyen registros con \code{fecha <= corte}.}
 
-\item{voceros}{Data frame del catálogo de voceros. Columnas requeridas:
-\code{num}, \code{nombre_completo}, \code{cargo}, \code{status}, \code{id_brigada}.}
-
-\item{brigadas}{Data frame del catálogo de brigadas. Columnas requeridas:
-\code{activo_brigada}, \code{id_brigada}, \code{nombre_brigada}.}
-
-\item{coordinadores}{Data frame del catálogo de coordinadores. Columnas
-requeridas: \code{status_coord}, \code{nombre_brigada}, \code{nombre_coordinador}.}
-
-\item{aux_zonas}{Data frame auxiliar de zonas geográficas. Debe contener la
-columna \code{seccion} para el \emph{join} con la base de encuesta.}
+\item{bd_aux}{Data frame producido por \code{cargar_insumos()$bd_aux} con la
+jerarquía vocero → brigada → coordinador resuelta al corte. Columnas
+requeridas: \code{vocero}, \code{nombre_vocero}, \code{nombre_coordinador}.}
 
 \item{na_chr}{Cadena usada para rellenar \code{NA} en columnas de carácter.
 Predeterminado: \code{"-"}.}
@@ -62,11 +51,10 @@ contacto, conocimiento y opinión del personaje, y —cuando
 \code{categoria} (etiqueta descriptiva).
 }
 \description{
-Integra los registros de encuesta con el catálogo operativo de voceros,
-coordinadores y brigadas, filtra los registros que cuentan con al menos
-un medio de contacto (correo o celular) y, opcionalmente, clasifica a
-cada contacto según su simpatía de partido y su opinión sobre un personaje
-político.
+Integra los registros de encuesta con la jerarquía operativa resuelta por
+\code{cargar_insumos()}, filtra los registros que cuentan con al menos un medio
+de contacto (correo o celular) y, opcionalmente, clasifica a cada contacto
+según su simpatía de partido y su opinión sobre un personaje político.
 }
 \section{Seguridad y Privacidad}{
 
