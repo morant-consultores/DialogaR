@@ -32,6 +32,9 @@
 #' @param clasificacion Lógico. Si `TRUE`, añade las columnas `grupo` y
 #'   `categoria` con la clasificación estratégica del contacto. Requiere que
 #'   `partido` no sea `NULL`. Predeterminado: `FALSE`.
+#' @param cargo_coordinador Carácter. Valor del campo `cargo` que identifica
+#'   coordinadores en el catálogo de voceros. Debe coincidir con el valor
+#'   usado en `cargar_insumos()`. Predeterminado: `"Coordinador de Brigada"`.
 #'
 #' @return Data frame con una fila por contacto que tenga correo o celular
 #'   registrado. Incluye columnas de identificación, ubicación, datos de
@@ -57,7 +60,8 @@ construir_base_contactos <- function(
   coordinadores,
   aux_zonas,
   na_chr = "-",
-  clasificacion = FALSE
+  clasificacion = FALSE,
+  cargo_coordinador = "Coordinador de Brigada"
 ) {
   # ------------------------------------------------------------
   # Helpers
@@ -120,7 +124,7 @@ construir_base_contactos <- function(
     dplyr::filter(activo_brigada == TRUE) |>
     dplyr::left_join(
       voceros |>
-        dplyr::filter(cargo == "Coordinador de Brigada", status == TRUE),
+        dplyr::filter(cargo == cargo_coordinador, status == TRUE),
       by = "id_brigada"
     ) |>
     dplyr::select(nombre_brigada, id_brigada)
