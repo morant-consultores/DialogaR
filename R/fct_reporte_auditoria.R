@@ -89,13 +89,23 @@ generar_metricas_auditoria <- function(
   # 3. Extracción y Parseo de JSON
   evaluacion_raw <- dplyr::tbl(pool, "EvaluacionRegistro") |>
     dplyr::collect() |>
-    dplyr::mutate(
+   dplyr::mutate(
       json_parseado = purrr::map(Resultado, \(x) {
         lista_cruda <- jsonlite::fromJSON(x)
-        lista_limpia <- purrr::map(lista_cruda, \(item) if (length(item) == 0) NA else item)
+        # Limpieza: Convertimos elementos con múltiples valores a un solo texto
+        lista_limpia <- purrr::map(lista_cruda, \(item) {
+          if (length(item) == 0) {
+            NA
+          } else if (length(item) > 1) {
+            # Si tiene más de un valor (como tus 3 preguntas), los pega con una coma
+            paste(as.character(item), collapse = ", ")
+          } else {
+            item
+          }
+        })
         tibble::as_tibble_row(lista_limpia)
       })
-    ) |>
+    )
     tidyr::unnest_wider(json_parseado) |>
     dplyr::mutate(fecha = as.Date(Fecha)) |> 
     dplyr::select(-Resultado) # <--- ELIMINADO EL |> AQUÍ
