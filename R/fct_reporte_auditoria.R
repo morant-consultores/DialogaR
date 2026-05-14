@@ -53,51 +53,44 @@ generar_metricas_auditoria <- function(
   bd_completa,
   brigadas,
   voceros,
-  corte, # Se asume que 'corte' es el domingo que se ejecuta el script
+  corte, 
   week_start = 1,
   excluir_brigadas = "CAPACITACIONES"
 ) {
   # 1. Definición de Ventanas Temporales Específicas
-  # Si corte es Domingo 2026-03-29:
-  
   # Ventana Auditoría: Lunes a Sábado de la semana corriente
-  # lunes_auditoria = 2026-03-23 | domingo_auditoria (excluyente) = 2026-03-29
   fecha_inicio_au <- lubridate::floor_date(as.Date(corte), unit = "week", week_start = 1)
-  fecha_fin_au    <- as.Date(corte) # El domingo es el límite superior (no se incluye el domingo)
+  fecha_fin_au    <- as.Date(corte) 
 
   # Ventana Efectivos: Viernes (semana pasada) a Jueves (semana corriente)
-  # Si hoy es Domingo, el jueves pasado es hoy - 3 días, y el viernes anterior es hoy - 9 días.
-  fecha_fin_ef    <- as.Date(corte) - 2 # El viernes (excluyente), llega hasta el jueves 23:59
-  fecha_inicio_ef <- fecha_fin_ef - 6  # 7 días atrás desde el viernes (inicia el viernes anterior)
+  fecha_fin_ef    <- as.Date(corte) - 2 
+  fecha_inicio_ef <- fecha_fin_ef - 6  
 
   # 2. Preparación de IDs
-  # Semanal (Basado en ventana de Auditoría: Lunes-Sábado)
   registros_id_sem <- bd_completa |>
     dplyr::summarise(fecha = min(fecha, na.rm = TRUE), usuario_num = dplyr::first(usuario_num), .by = id) |>
     dplyr::filter(fecha >= fecha_inicio_au & fecha < fecha_fin_au) |>
     dplyr::transmute(id = as.integer(id), usuario_num)
 
-  # Histórico (Sin cambios, todos los IDs)
   registros_id_hist <- bd_completa |>
     dplyr::summarise(fecha = min(fecha, na.rm = TRUE), usuario_num = dplyr::first(usuario_num), .by = id) |>
     dplyr::transmute(id = as.integer(id), usuario_num)
 
   if (nrow(registros_id_sem) == 0) {
-    cli::cli_abort("No hay registros auditables en la ventana de lunes a sábado ({fecha_inicio_au} a {fecha_fin_au}).")
+    cli::cli_abort("No hay registros auditables en la ventana {fecha_inicio_au} a {fecha_fin_au}.")
   }
 
-  # 3. Extracción y Parseo de JSON
+  # 3. Extracción y Parseo de JSON (Corregido para vectores de tamaño > 1)
   evaluacion_raw <- dplyr::tbl(pool, "EvaluacionRegistro") |>
     dplyr::collect() |>
-   dplyr::mutate(
+    dplyr::mutate(
       json_parseado = purrr::map(Resultado, \(x) {
         lista_cruda <- jsonlite::fromJSON(x)
-        # Limpieza: Convertimos elementos con múltiples valores a un solo texto
         lista_limpia <- purrr::map(lista_cruda, \(item) {
           if (length(item) == 0) {
             NA
           } else if (length(item) > 1) {
-            # Si tiene más de un valor (como tus 3 preguntas), los pega con una coma
+            # Fix: Colapsa elementos como 'preguntas_finales' en un solo string
             paste(as.character(item), collapse = ", ")
           } else {
             item
@@ -105,10 +98,10 @@ generar_metricas_auditoria <- function(
         })
         tibble::as_tibble_row(lista_limpia)
       })
-    )
+    ) |>
     tidyr::unnest_wider(json_parseado) |>
     dplyr::mutate(fecha = as.Date(Fecha)) |> 
-    dplyr::select(-Resultado) # <--- ELIMINADO EL |> AQUÍ
+    dplyr::select(-Resultado)
 
   for (col in c("dictamenFinal", "totalEvaluacion", "observaciones")) {
     if (!col %in% names(evaluacion_raw)) evaluacion_raw[[col]] <- character()
@@ -118,8 +111,7 @@ generar_metricas_auditoria <- function(
   evaluacion_sem <- evaluacion_raw |>
     dplyr::filter(fecha >= fecha_inicio_au & fecha < fecha_fin_au) 
 
-  # Cambiamos evaluacion_raw por evaluacion_sem aquí:
-  bd_prom_sem <- evaluacion_sem |> 
+  bd_prom_sem <- evaluacion_sem |>
     dplyr::mutate(totalEvaluacion = dplyr::if_else(dictamenFinal == "Eliminada", "0", as.character(totalEvaluacion))) |>
     dplyr::summarise(
       total = round(mean(as.numeric(totalEvaluacion), na.rm = TRUE), 1),
@@ -130,7 +122,7 @@ generar_metricas_auditoria <- function(
       eliminados  = sum(dictamenFinal == "Eliminada", na.rm = TRUE),
       .by = usuario_num
     )
-  
+
   # 5. Procesamiento HISTÓRICO
   evaluacion_hist <- evaluacion_raw |>
     dplyr::inner_join(registros_id_hist, by = dplyr::join_by(RegistroId == id))
@@ -147,25 +139,26 @@ generar_metricas_auditoria <- function(
       .by = usuario_num
     )
 
-  # 6. Catálogos y Efectivos (Nueva Lógica de Fechas)
+  # 6. Catálogos y Efectivos
   voceros_au <- brigadas |>
     dplyr::select(id_brigada, nombre_brigada) |>
-    dplyr::left_join(voceros |> dplyr::select(nombre_completo, num, id_brigada, status), by = "id_brigada") |>
+    dplyr::left_join(
+      voceros |> dplyr::select(nombre_completo, num, id_brigada, status), 
+      by = "id_brigada"
+    ) |>
     dplyr::filter(status == TRUE) |>
     dplyr::rename(usuario_num = num)
 
-  # Aplicando ventana Viernes a Jueves
   efectivos_sem <- bd_completa |>
     dplyr::filter(fecha >= fecha_inicio_ef & fecha < fecha_fin_ef) |>
     dplyr::summarise(efectivos = sum(desglose == "Efectivo", na.rm = TRUE), 
                      fecha_ultimo_registro = as.Date(max(fecha, na.rm = TRUE)), .by = usuario_num)
 
-  # El histórico de efectivos sigue siendo global
   efectivos_hist <- bd_completa |>
     dplyr::summarise(efectivos = sum(desglose == "Efectivo", na.rm = TRUE), 
                      fecha_ultimo_registro = as.Date(max(fecha, na.rm = TRUE)), .by = usuario_num)
 
-  # 7. Ensamblado de Tablas Finales
+  # 7. Ensamblado Final
   res_auditoria <- voceros_au |>
     dplyr::inner_join(bd_prom_sem, by = "usuario_num") |>
     dplyr::left_join(efectivos_sem, by = "usuario_num") |>
@@ -201,7 +194,6 @@ generar_metricas_auditoria <- function(
     res_auditoria_hist = res_auditoria_hist
   ))
 }
-
 #' Create Excel Workbook for Audit Report
 #'
 #' @description
