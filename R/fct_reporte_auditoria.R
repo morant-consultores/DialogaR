@@ -1,267 +1,244 @@
-# -------------------------------------------------------------------------
 # PROYECTO: DialogaR
-# SCRIPT:   fct_reporte_auditoria.R
+# SCRIPT: fct_reporte_auditoria.R
 # OBJETIVO: Extracción, cálculo y exportación del reporte de auditoría
-# AUTOR:    Rafael López / Equipo de Análisis
-# FECHA:    2026-03-24
-# -------------------------------------------------------------------------
-# CLASIFICACIÓN: Interno / Crítico (Activos de Información Tipo A)
-# -------------------------------------------------------------------------
-# NOTAS DE SEGURIDAD:
-# - No hardcodear credenciales. Usar .Renviron.
-# - Las descargas de la base de datos están optimizadas (Pushdown) para
-#   no saturar la memoria RAM del servidor.
-# - Regla de Negocio: Se excluyen explícitamente los voceros inactivos.
 # -------------------------------------------------------------------------
 
-#' Generar Métricas del Reporte de Auditoría
-#'
-#' @description
-#' Extrae y procesa las evaluaciones de calidad (auditorías) realizadas a los
-#' registros de campo en una ventana temporal. Desanida la información en formato JSON
-#' y cruza los resultados con el catálogo de voceros activos.
-#'
-#' **Lógica de Negocio:**
-#' * **Voceros Inactivos:** Por requerimiento directivo, los voceros con `status == FALSE`
-#'   son excluidos del reporte, incluso si tuvieron auditorías en esa semana.
-#' * **Eliminados:** Las auditorías con dictamen "Eliminada" se penalizan forzando
-#'   su calificación total a 0.
-#'
-#' @param pool Conexión activa a la base de datos (DBI).
-#' @param bd_completa Tibble. Hechos de actividad operativa (registros).
-#' @param brigadas Tibble. Catálogo de brigadas.
-#' @param voceros Tibble. Catálogo de voceros.
-#' @param corte Date. Fecha de corte del reporte. Solo se usa como fallback; en modo dinámico la semana se ancla a la última fecha con auditorías reales en `EvaluacionRegistro`.
-#' @param week_start Numeric. Día de inicio de la semana (1 = Lunes, 6 = Sábado, 7 = Domingo). Por defecto 1.
-#' @param fecha_inicio Date. Límite inferior de la ventana. Si es `NULL`, se calcula dinámicamente usando `corte` y `week_start`.
-#' @param fecha_fin Date. Límite superior de la ventana. Si es `NULL`, se calcula dinámicamente usando `corte` y `week_start`.
-#' @param excluir_brigadas Character vector. Nombres o fragmentos de nombres de brigadas a excluir. Por defecto `"CAPACITACIONES"`.
-#'
-#' @return Lista con dos tibbles: `res_auditoria` (promedios por vocero) y `observaciones` (detalle de incidencias).
-#' @export
-#' Generar Métricas del Reporte de Auditoría (Semanal + Histórico)
-#'
-#' @description
-#' Extrae y procesa las evaluaciones de calidad. Ahora incluye el desglose de 
-#' dictámenes (Óptimo, Aceptable, Deficiente) tanto para el corte semanal 
-#' como para el acumulado histórico.
-#'
-#' @return Lista con tres tibbles: `res_auditoria`, `observaciones` y `res_auditoria_hist`.
-#' @export
 generar_metricas_auditoria <- function(
-  pool,
-  bd_completa,
-  brigadas,
-  voceros,
-  corte, 
-  week_start = 1,
-  excluir_brigadas = "CAPACITACIONES"
+    pool,
+    bd_completa,
+    brigadas,
+    voceros,
+    corte, 
+    dia_inicio_ef = "viernes", 
+    dia_fin_ef = "jueves",
+    excluir_brigadas = "CAPACITACIONES", 
+    simular_domingo = F
 ) {
-  # 1. Definición de Ventanas Temporales Específicas
-  # Ventana Auditoría: Lunes a Sábado de la semana corriente
-  fecha_inicio_au <- lubridate::floor_date(as.Date(corte), unit = "week", week_start = 1)
-  fecha_fin_au    <- as.Date(corte) 
+  
+  # --- 1. LÓGICA DE VENTANAS TEMPORALES ---
+corte_dt <- as.Date(corte)
 
-  # Ventana Efectivos: Viernes (semana pasada) a Jueves (semana corriente)
-  fecha_fin_ef    <- as.Date(corte) - 2 
-  fecha_inicio_ef <- fecha_fin_ef - 6  
+# Si estás probando entre semana, avanza al domingo de esta semana
+if (simular_domingo) {
+  corte_dt <- lubridate::ceiling_date(corte_dt, unit = "week", week_start = 1) - 1
+  cli::cli_alert_info("Modo prueba: corte ajustado a {corte_dt} (domingo)")
+}
 
-  # 2. Preparación de IDs
-  registros_id_sem <- bd_completa |>
-    dplyr::summarise(fecha = min(fecha, na.rm = TRUE), usuario_num = dplyr::first(usuario_num), .by = id) |>
-    dplyr::filter(fecha >= fecha_inicio_au & fecha < fecha_fin_au) |>
-    dplyr::transmute(id = as.integer(id), usuario_num)
+encontrar_fecha_exacta <- function(referencia, nombre_dia) {
+  dias_ref <- c("lunes" = 1, "martes" = 2, "miercoles" = 3, "miércoles" = 3,
+                "jueves" = 4, "viernes" = 5, "sabado" = 6, "sábado" = 6,
+                "domingo" = 7)
+  
+  target_num <- dias_ref[tolower(nombre_dia)]
+  actual_num <- lubridate::wday(referencia, week_start = 1)
+  
+  diff <- actual_num - target_num
+  if (diff < 0) diff <- diff + 7
+  if (diff == 0) diff <- 7
+  
+  return(referencia - diff)
+}
 
+# Ventana EFECTIVOS (semana anterior, configurable por proyecto)
+fecha_inicio_au <- lubridate::floor_date(corte_dt, unit = "week", week_start = 1)
+fecha_fin_au    <- corte_dt
+
+# Ventana EFECTIVOS (semana anterior al lunes de auditoría)
+# Anclamos desde fecha_inicio_au para garantizar que queda ANTES de la semana actual
+fecha_fin_ef    <- encontrar_fecha_exacta(fecha_inicio_au, dia_fin_ef)
+fecha_inicio_ef <- encontrar_fecha_exacta(fecha_fin_ef, dia_inicio_ef)
+
+cli::cli_inform(c(
+  "i" = "Ventana auditoría : {fecha_inicio_au} ({lubridate::wday(fecha_inicio_au, label=TRUE, abbr=FALSE)}) → {fecha_fin_au} ({lubridate::wday(fecha_fin_au, label=TRUE, abbr=FALSE)})",
+  "i" = "Ventana efectivos  : {fecha_inicio_ef} ({lubridate::wday(fecha_inicio_ef, label=TRUE, abbr=FALSE)}) → {fecha_fin_ef} ({lubridate::wday(fecha_fin_ef, label=TRUE, abbr=FALSE)})"
+))
+  # --- 2. PREPARACIÓN DE DATOS BASE ---
   registros_id_hist <- bd_completa |>
     dplyr::summarise(fecha = min(fecha, na.rm = TRUE), usuario_num = dplyr::first(usuario_num), .by = id) |>
     dplyr::transmute(id = as.integer(id), usuario_num)
 
-  if (nrow(registros_id_sem) == 0) {
-    cli::cli_abort("No hay registros auditables en la ventana {fecha_inicio_au} a {fecha_fin_au}.")
-  }
-
-  # 3. Extracción y Parseo de JSON (Corregido para vectores de tamaño > 1)
-  evaluacion_raw <- dplyr::tbl(pool, "EvaluacionRegistro") |>
-    dplyr::collect() |>
+  # --- 3. EXTRACCIÓN Y PARSEO DE JSON (CON AJUSTE CDMX) ---
+  evaluacion_raw <- registros_id_hist  |>
+    dplyr::inner_join(dplyr::tbl(pool, "EvaluacionRegistro") |>
+    dplyr::collect() , by = dplyr::join_by(id == RegistroId)) |>
     dplyr::mutate(
       json_parseado = purrr::map(Resultado, \(x) {
         lista_cruda <- jsonlite::fromJSON(x)
         lista_limpia <- purrr::map(lista_cruda, \(item) {
-          if (length(item) == 0) {
-            NA
-          } else if (length(item) > 1) {
-            # Fix: Colapsa elementos como 'preguntas_finales' en un solo string
-            paste(as.character(item), collapse = ", ")
-          } else {
-            item
-          }
+          if (length(item) == 0) return(NA)
+          if (length(item) > 1) return(list(item)) 
+          return(item)
         })
         tibble::as_tibble_row(lista_limpia)
       })
     ) |>
     tidyr::unnest_wider(json_parseado) |>
-    dplyr::mutate(fecha = as.Date(Fecha)) |> 
-    dplyr::select(-Resultado)
+    dplyr::mutate(
+      fecha_hora_cdmx = lubridate::with_tz(Fecha, tzone = "America/Mexico_City"),
+    # 2. Extraemos solo la fecha (opcional, si lo necesitas para el conteo)
+    fecha = as.Date(fecha_hora_cdmx)
+    ) |>
+    dplyr::select(-Resultado) |>
+    (\(df) {
+      for (col in c("dictamenFinal", "totalEvaluacion", "observaciones")) {
+        if (!col %in% names(df)) df[[col]] <- NA_character_
+      }
+      return(df)
+    })()
 
-  for (col in c("dictamenFinal", "totalEvaluacion", "observaciones")) {
-    if (!col %in% names(evaluacion_raw)) evaluacion_raw[[col]] <- character()
-  }
-
-  # 4. Procesamiento SEMANAL (Lunes-Sábado)
+  browser()
+  # --- 4. PROCESAMIENTO SEMANAL ---
   evaluacion_sem <- evaluacion_raw |>
-    dplyr::filter(fecha >= fecha_inicio_au & fecha < fecha_fin_au) 
+    dplyr::filter(fecha >= fecha_inicio_au & fecha < fecha_fin_au)
 
   bd_prom_sem <- evaluacion_sem |>
     dplyr::mutate(totalEvaluacion = dplyr::if_else(dictamenFinal == "Eliminada", "0", as.character(totalEvaluacion))) |>
     dplyr::summarise(
       total = round(mean(as.numeric(totalEvaluacion), na.rm = TRUE), 1),
       dialogos_auditados = dplyr::n(),
-      optimos     = sum(dictamenFinal == "Diálogo Óptimo", na.rm = TRUE),
-      aceptables  = sum(dictamenFinal == "Diálogo Aceptable", na.rm = TRUE),
+      optimos = sum(dictamenFinal == "Diálogo Óptimo", na.rm = TRUE),
+      aceptables = sum(dictamenFinal == "Diálogo Aceptable", na.rm = TRUE),
       deficientes = sum(dictamenFinal == "Diálogo Deficiente", na.rm = TRUE),
-      eliminados  = sum(dictamenFinal == "Eliminada", na.rm = TRUE),
+      eliminados = sum(dictamenFinal == "Eliminada", na.rm = TRUE),
       .by = usuario_num
     )
 
-  # 5. Procesamiento HISTÓRICO
-  evaluacion_hist <- evaluacion_raw |>
-    dplyr::inner_join(registros_id_hist, by = dplyr::join_by(RegistroId == id))
 
-  bd_prom_hist <- evaluacion_hist |>
+  # --- 5. PROCESAMIENTO HISTÓRICO ---
+  bd_prom_hist <- evaluacion_raw |>
     dplyr::mutate(totalEvaluacion = dplyr::if_else(dictamenFinal == "Eliminada", "0", as.character(totalEvaluacion))) |>
     dplyr::summarise(
       total = round(mean(as.numeric(totalEvaluacion), na.rm = TRUE), 1),
       dialogos_auditados = dplyr::n(),
-      optimos     = sum(dictamenFinal == "Diálogo Óptimo", na.rm = TRUE),
-      aceptables  = sum(dictamenFinal == "Diálogo Aceptable", na.rm = TRUE),
+      optimos = sum(dictamenFinal == "Diálogo Óptimo", na.rm = TRUE),
+      aceptables = sum(dictamenFinal == "Diálogo Aceptable", na.rm = TRUE),
       deficientes = sum(dictamenFinal == "Diálogo Deficiente", na.rm = TRUE),
-      eliminados  = sum(dictamenFinal == "Eliminada", na.rm = TRUE),
+      eliminados = sum(dictamenFinal == "Eliminada", na.rm = TRUE),
       .by = usuario_num
     )
 
-  # 6. Catálogos y Efectivos
+  # --- 6. CATÁLOGOS Y EFECTIVOS ---
   voceros_au <- brigadas |>
     dplyr::select(id_brigada, nombre_brigada) |>
-    dplyr::left_join(
-      voceros |> dplyr::select(nombre_completo, num, id_brigada, status), 
-      by = "id_brigada"
-    ) |>
+    dplyr::left_join(voceros |> dplyr::select(nombre_completo, num, id_brigada, status), by = "id_brigada") |>
     dplyr::filter(status == TRUE) |>
     dplyr::rename(usuario_num = num)
 
   efectivos_sem <- bd_completa |>
-    dplyr::filter(fecha >= fecha_inicio_ef & fecha < fecha_fin_ef) |>
-    dplyr::summarise(efectivos = sum(desglose == "Efectivo", na.rm = TRUE), 
+    dplyr::filter(fecha >= fecha_inicio_ef & fecha <= fecha_fin_ef) |>
+    dplyr::summarise(efectivos = sum(desglose == "Efectivo", na.rm = TRUE),
                      fecha_ultimo_registro = as.Date(max(fecha, na.rm = TRUE)), .by = usuario_num)
 
   efectivos_hist <- bd_completa |>
-    dplyr::summarise(efectivos = sum(desglose == "Efectivo", na.rm = TRUE), 
+    dplyr::summarise(efectivos = sum(desglose == "Efectivo", na.rm = TRUE),
                      fecha_ultimo_registro = as.Date(max(fecha, na.rm = TRUE)), .by = usuario_num)
 
-  # 7. Ensamblado Final
+  # --- 7. ENSAMBLADO Y ORDENADO ---
   res_auditoria <- voceros_au |>
     dplyr::inner_join(bd_prom_sem, by = "usuario_num") |>
     dplyr::left_join(efectivos_sem, by = "usuario_num") |>
     dplyr::rename(`Promedio de evaluaciones` = total) |>
     dplyr::relocate(optimos, aceptables, deficientes, .after = dialogos_auditados) |>
-    dplyr::arrange(dplyr::desc(`Promedio de evaluaciones`), dialogos_auditados)
+    dplyr::arrange(dplyr::desc(`Promedio de evaluaciones`), dplyr::desc(dialogos_auditados))
 
   res_auditoria_hist <- voceros_au |>
     dplyr::inner_join(bd_prom_hist, by = "usuario_num") |>
     dplyr::left_join(efectivos_hist, by = "usuario_num") |>
     dplyr::rename(`Promedio de evaluaciones` = total) |>
     dplyr::relocate(optimos, aceptables, deficientes, .after = dialogos_auditados) |>
-    dplyr::arrange(dplyr::desc(`Promedio de evaluaciones`), dialogos_auditados)
+    dplyr::arrange(dplyr::desc(`Promedio de evaluaciones`), dplyr::desc(dialogos_auditados))
 
   observaciones <- voceros_au |>
     dplyr::inner_join(
-      evaluacion_sem |> dplyr::select(RegistroId, dplyr::any_of(c("Fecha", "fecha")), 
-                                      usuario_num, observaciones, dictamenFinal),
+      evaluacion_sem |> dplyr::select(id, fecha, usuario_num, observaciones, dictamenFinal),
       by = "usuario_num"
     )
 
-  # 8. Filtro de Brigadas
-  if (!is.null(excluir_brigadas) && length(excluir_brigadas) > 0) {
+  # --- 8. FILTRO DE BRIGADAS ---
+  if (!is.null(excluir_brigadas)) {
     patron <- paste(excluir_brigadas, collapse = "|")
     res_auditoria <- dplyr::filter(res_auditoria, !grepl(patron, nombre_brigada, ignore.case = TRUE))
     res_auditoria_hist <- dplyr::filter(res_auditoria_hist, !grepl(patron, nombre_brigada, ignore.case = TRUE))
     observaciones <- dplyr::filter(observaciones, !grepl(patron, nombre_brigada, ignore.case = TRUE))
   }
 
-  return(list(
-    res_auditoria = res_auditoria,
-    observaciones = observaciones,
-    res_auditoria_hist = res_auditoria_hist
-  ))
+  return(list(res_auditoria = res_auditoria, observaciones = observaciones, res_auditoria_hist = res_auditoria_hist))
 }
-#' Create Excel Workbook for Audit Report
-#'
-#' @description
-#' Receives the audit metrics generated by `generar_metricas_auditoria`
-#' and builds an Excel workbook object (`Workbook`), applying conditional formatting
-#' (color scale) to the averages column.
-#'
-#' **Note:** This function does not save the file to disk. It returns the workbook
-#' object in memory so it can be passed to downstream upload/save functions.
-#'
-#' @param datos_auditoria List. Output from the `generar_metricas_auditoria()` function.
-#'
-#' @return An `openxlsx` Workbook object.
-#' @export
+# --- FUNCIÓN EXPORTACIÓN EXCEL ---
 crear_workbook_auditoria <- function(datos_auditoria) {
-  # 1. Validate that the data has the correct structure (Fail-fast)
-  if (!all(c("res_auditoria", "observaciones") %in% names(datos_auditoria))) {
-    cli::cli_abort(
-      "The 'datos_auditoria' object must contain 'res_auditoria' and 'observaciones'."
-    )
-  }
-
-  # 2. Initialize workbook and add sheets
   wb <- openxlsx::createWorkbook()
-  openxlsx::addWorksheet(wb, "res_auditoria")
-  openxlsx::addWorksheet(wb, "observaciones")
-    openxlsx::addWorksheet(wb, "res_auditoria_hist")
-
-
-  # 3. Write data to sheets
-  openxlsx::writeData(wb, "res_auditoria", datos_auditoria$res_auditoria)
-  openxlsx::writeData(wb, "observaciones", datos_auditoria$observaciones)
-    openxlsx::writeData(wb, "res_auditoria_hist", datos_auditoria$res_auditoria_hist)
-
-
-  # 4. Apply conditional formatting (Color scale)
-  col_total <- which(
-    names(datos_auditoria$res_auditoria) == "Promedio de evaluaciones"
-  )
-
-  if (length(col_total) > 0) {
-    openxlsx::conditionalFormatting(
-      wb,
-      sheet = "res_auditoria",
-      cols = col_total,
-      rows = 2:(nrow(datos_auditoria$res_auditoria) + 1), # +1 to account for the header
-      style = c("#FF0000", "#00FF00"), # Red to Green
-      type = "colourScale"
-    )
+  
+  hojas <- names(datos_auditoria)
+  for (hoja in hojas) {
+    openxlsx::addWorksheet(wb, hoja)
+    openxlsx::writeData(wb, hoja, datos_auditoria[[hoja]])
+    
+    # Formato condicional para promedios
+    col_total <- which(names(datos_auditoria[[hoja]]) == "Promedio de evaluaciones")
+    if (length(col_total) > 0) {
+      openxlsx::conditionalFormatting(wb, sheet = hoja, cols = col_total,
+                                      rows = 2:(nrow(datos_auditoria[[hoja]]) + 1),
+                                      style = c("#FF0000", "#00FF00"), type = "colourScale")
+    }
   }
-
-  col_total <- which(
-    names(datos_auditoria$res_auditoria_hist) == "Promedio de evaluaciones"
-  )
-
-  if (length(col_total) > 0) {
-    openxlsx::conditionalFormatting(
-      wb,
-      sheet = "res_auditoria_hist",
-      cols = col_total,
-      rows = 2:(nrow(datos_auditoria$res_auditoria_hist) + 1), # +1 to account for the header
-      style = c("#FF0000", "#00FF00"), # Red to Green
-      type = "colourScale"
-    )
-  }
-
-  cli::cli_alert_success("Excel workbook successfully created in memory.")
-
-  # 5. Return the object to the user's session
+  
+  cli::cli_alert_success("Libro de Excel generado exitosamente.")
   return(wb)
+}
+crear_workbook_auditoria <- function(datos_auditoria) {
+# 1. Validate that the data has the correct structure (Fail-fast)
+if (!all(c("res_auditoria", "observaciones") %in% names(datos_auditoria))) {
+cli::cli_abort(
+"The 'datos_auditoria' object must contain 'res_auditoria' and 'observaciones'."
+)
+}
+
+# 2. Initialize workbook and add sheets
+wb <- openxlsx::createWorkbook()
+openxlsx::addWorksheet(wb, "res_auditoria")
+openxlsx::addWorksheet(wb, "observaciones")
+openxlsx::addWorksheet(wb, "res_auditoria_hist")
+
+
+# 3. Write data to sheets
+openxlsx::writeData(wb, "res_auditoria", datos_auditoria$res_auditoria)
+openxlsx::writeData(wb, "observaciones", datos_auditoria$observaciones)
+openxlsx::writeData(wb, "res_auditoria_hist", datos_auditoria$res_auditoria_hist)
+
+
+# 4. Apply conditional formatting (Color scale)
+col_total <- which(
+names(datos_auditoria$res_auditoria) == "Promedio de evaluaciones"
+)
+
+if (length(col_total) > 0) {
+openxlsx::conditionalFormatting(
+wb,
+sheet = "res_auditoria",
+cols = col_total,
+rows = 2:(nrow(datos_auditoria$res_auditoria) + 1), # +1 to account for the header
+style = c("#FF0000", "#00FF00"), # Red to Green
+type = "colourScale"
+)
+}
+
+col_total <- which(
+names(datos_auditoria$res_auditoria_hist) == "Promedio de evaluaciones"
+)
+
+if (length(col_total) > 0) {
+openxlsx::conditionalFormatting(
+wb,
+sheet = "res_auditoria_hist",
+cols = col_total,
+rows = 2:(nrow(datos_auditoria$res_auditoria_hist) + 1), # +1 to account for the header
+style = c("#FF0000", "#00FF00"), # Red to Green
+type = "colourScale"
+)
+}
+
+cli::cli_alert_success("Excel workbook successfully created in memory.")
+
+# 5. Return the object to the user's session
+return(wb)
 }
