@@ -180,6 +180,10 @@ insumos <- cargar_insumos(
   }
 )
 
+brigadas <- insumos$cat$brigadas
+voceros  <- insumos$cat$usuarios |>
+  dplyr::mutate(municipio = toupper(municipio_usuario))
+
 cli::cli_alert_success(
   "Insumos cargados: {nrow(insumos$bd_actividad)} registros de actividad."
 )
