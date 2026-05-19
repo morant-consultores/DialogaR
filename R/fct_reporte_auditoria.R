@@ -1,7 +1,72 @@
-# PROYECTO: DialogaR
-# SCRIPT: fct_reporte_auditoria.R
-# OBJETIVO: Extracción, cálculo y exportación del reporte de auditoría
 # -------------------------------------------------------------------------
+# PROYECTO: Nombre del Cliente
+# SCRIPT:   fct_reporte_auditoria.R
+# OBJETIVO: Descripción breve de la lógica del script
+# AUTOR:    Pedro Castro / Equipo de Análisis
+# FECHA:    2026-05-18
+# -------------------------------------------------------------------------
+# CLASIFICACIÓN: Interno
+# ORIGEN DATOS:  Fuentes de datos o tablas SQL
+# DEPENDENCIAS:  {dplyr, {dbplyr}, {here}}
+# -------------------------------------------------------------------------
+# NOTAS DE SEGURIDAD:
+# - No hardcodear credenciales. Usar .Renviron
+# - Los datos resultantes se consideran activos de información tipo A
+# -------------------------------------------------------------------------
+#' Generar Reporte de Métricas de Auditoría y Producción
+#'
+#' @description
+#' Procesa y consolida la información de producción semanal e histórica de los voceros y coordinadores,
+#' cruza los datos con las evaluaciones de auditoría almacenadas en la base de datos y genera estructuras
+#' listas para reporte. Opcionalmente, actualiza y filtra un archivo histórico local en formato RDS.
+#'  Este reporte está construido de dos periodos de tiempo. La columna efectivos retrocede al reporte semanal inmediato previo y expone esos valores. 
+#' Mientras que los vals de auditoría corresponden a la semana natural corriente del reporte (lunes a domingo)
+#'
+#' @param pool Objeto de conexión `pool` a la base de datos relacional (contiene la tabla `EvaluacionRegistro`).
+#' @param insumos Lista que contiene catálogos base; debe incluir `cat$usuarios` con el rol de los integrantes.
+#' @param bd_completa Data frame o tibble con el histórico de producción y desgloses de efectividad.
+#' @param bd_aux Data frame o tibble con la estructura operativa (voceros, coordinadores, supervisores y brigadas).
+#' @param id_proyecto Identificador numérico o caracter del proyecto a evaluar (actualmente reservado para futuras extensiones).
+#' @param corte Fecha o string equivalente (`YYYY-MM-DD`) que define el límite superior para la auditoría semanal.
+#' @param inicio_semanal Caracter. Día de la semana en que inicia el periodo efectivo (ej. "lunes"). Por defecto es "lunes".
+#' @param fin_semanal Caracter. Día de la semana en que cierra el periodo efectivo (ej. "domingo"). Por defecto es "domingo".
+#' @param simular_domingo Lógico. Si es `TRUE`, ajusta automáticamente la fecha de corte al domingo de esa misma semana. Por defecto es `FALSE`.
+#' @param excluir_brigadas Vector de caracteres. Nombres o patrones de brigadas que se desean excluir del reporte final. Por defecto es `NULL`.
+#' @param filtrar_historicos Lógico. Si es `TRUE`, los promedios históricos se calcularán basándose únicamente en los IDs guardados en el archivo RDS acumulado, el cual también se actualizará con los registros de esta semana. Por defecto es `FALSE`.
+#'
+#' @return Una `lista` con tres elementos (tibbles):
+#' \desc{
+#'   \item{res_auditoria}{Métricas resumidas de la semana actual por vocero/brigada.}
+#'   \item{observaciones}{Detalle de comentarios y dictámenes individuales de la semana.}
+#'   \item{res_auditoria_hist}{Métricas resumidas históricas (totales o filtradas por el RDS) por vocero/brigada.}
+#' }
+#' 
+#' @export
+#' @importFrom dplyr mutate filter summarise arrange distinct left_join inner_join bind_rows transmute select rename relocate n ...
+#' @importFrom lubridate ceiling_date floor_date wday with_tz
+#' @importFrom tidyr replace_na complete nesting unnest_wider
+#' @importFrom cli cli_alert_info cli_inform cli_alert_success
+#' @importFrom jsonlite fromJSON
+#' @importFrom purrr map map_limpia
+#' @importFrom readr read_rds write_rds
+#' 
+#' @examples
+#' \dontrun{
+#' # Ejemplo de uso típico:
+#' reportes <- generar_reporte_metricas(
+#'   pool = mi_conexion, 
+#'   insumos = lista_insumos, 
+#'   bd_completa = df_produccion, 
+#'   bd_aux = df_estructura, 
+#'   corte = "2026-05-15",
+#'   filtrar_historicos = TRUE
+#' )
+#' }
+#'
+#' 
+#'
+#' 
+#' 
 
 generar_reporte_metricas <- function(pool, 
                                      insumos, 
@@ -9,11 +74,12 @@ generar_reporte_metricas <- function(pool,
                                      bd_aux, 
                                      id_proyecto, 
                                      corte, 
-                                     dia_inicio_ef = "lunes", 
-                                     dia_fin_ef = "domingo", 
+                                     inicio_semanal = "lunes", 
+                                     fin_semanal = "domingo", 
                                      simular_domingo = FALSE,
                                      excluir_brigadas = NULL,
-                                     filtrar_historicos = FALSE) { # <-- Nuevo parámetro condicional
+                                     filtrar_historicos = FALSE,
+                                    path_historicos = path_historicos) { # <-- Nuevo parámetro condicional
   
   # --- 1. LÓGICA DE FECHAS ---
   corte_dt <- as.Date(corte)
@@ -35,9 +101,20 @@ generar_reporte_metricas <- function(pool,
   
   fecha_inicio_au <- lubridate::floor_date(corte_dt, unit = "week", week_start = 1)
   fecha_fin_au    <- corte_dt
-  fecha_fin_ef    <- encontrar_fecha_exacta(fecha_inicio_au, dia_fin_ef)
-  fecha_inicio_ef <- encontrar_fecha_exacta(fecha_fin_ef, dia_inicio_ef)
+  fecha_fin_ef    <- encontrar_fecha_exacta(fecha_inicio_au, fin_semanal)
+  fecha_inicio_ef <- encontrar_fecha_exacta(fecha_fin_ef, inicio_semanal)
   rango_fechas    <- seq.Date(fecha_inicio_ef, fecha_fin_ef, by = "day")
+  
+  testthat::test_that("Validación interna de consistencia de fechas", {
+    # 1. El fin efectivo no puede ser posterior al fin de auditoría
+    testthat::expect_true(fecha_fin_ef <= fecha_fin_au)
+    # 2. El inicio efectivo debe ser menor o igual al fin efectivo
+    testthat::expect_true(fecha_inicio_ef <= fecha_fin_ef)
+    # 3. Si se simuló domingo, la fecha de fin de auditoría DEBE ser domingo
+    if (simular_domingo) {
+      testthat::expect_equal(lubridate::wday(fecha_fin_au, week_start = 1), 7)
+    }
+  })
   
   cli::cli_inform(c(
     "v" = "Intervalos de fecha calculados:",
@@ -136,15 +213,14 @@ generar_reporte_metricas <- function(pool,
   evaluacion_sem <- evaluacion_raw |> dplyr::filter(fecha >= fecha_inicio_au & fecha < fecha_fin_au)
 
   # --- 5.1 LÓGICA DE ACTUALIZACIÓN DEL ARCHIVO DE HISTÓRICOS (.RDS) ---
-path_rds <- "data-raw/registros_auditoria.rds"
   
   if (filtrar_historicos) {
     # 1. Extraer los IDs de esta semana como un vector numérico plano
     reg_semana <- evaluacion_sem |> dplyr::pull(RegistroId)
     
     # 2. Cargar históricos existentes asegurando que se extraigan como vector plano
-    if (file.exists(path_rds)) {
-      reg_hist_previos <- readr::read_rds(path_rds)
+    if (file.exists(path_historicos)) {
+      reg_hist_previos <- readr::read_rds(path_historicos)
       reg_hist_previos <- unlist(reg_hist_previos) # Asegura romper cualquier estructura de lista previa
     } else {
       reg_hist_previos <- integer() 
@@ -154,7 +230,7 @@ path_rds <- "data-raw/registros_auditoria.rds"
     reg_hist_actualizado <- unique(c(reg_hist_previos, reg_semana))
     
     # 4. Guardar el vector numérico limpio en el RDS
-    readr::write_rds(reg_hist_actualizado, path_rds)
+    readr::write_rds(reg_hist_actualizado, path_historicos)
     
     cli::cli_alert_success("Base de históricos en RDS actualizada correctamente (Formato Vector).")
   }
@@ -229,9 +305,30 @@ path_rds <- "data-raw/registros_auditoria.rds"
   ))
 }
 
+#' Crear Libro de Excel para Reporte de Auditoría
+#'
+#' @description
+#' Toma la lista de datos generada por \code{\link{generar_reporte_metricas}} y construye un objeto Workbook
+#' de Excel con formato condicional de escala de colores (Rojo a Verde) para la columna "Promedio de evaluaciones".
+#'
+#' @param datos_auditoria Una lista que debe contener obligatoriamente los elementos `res_auditoria`, 
+#' `observaciones` y `res_auditoria_hist`.
+#'
+#' @return Un objeto de tipo \code{Workbook} (paquete \code{openxlsx}) listo para ser guardado con \code{saveWorkbook}.
+#' @export
+#' 
+#' @importFrom openxlsx createWorkbook addWorksheet writeData conditionalFormatting
+#' @importFrom cli cli_abort cli_alert_success
+#'
+#' @examples
+#' \dontrun{
+#' wb <- crear_workbook_auditoria(reportes)
+#' openxlsx::saveWorkbook(wb, "Reporte_Auditoria.xlsx", overwrite = TRUE)
+#' }
+#' 
 crear_workbook_auditoria <- function(datos_auditoria) {
 # 1. Validate that the data has the correct structure (Fail-fast)
-if (!all(c("res_auditoria", "observaciones") %in% names(datos_auditoria))) {
+if (!all(c("res_auditoria", "observaciones", "res_auditoria_hist") %in% names(datos_auditoria))) {
 cli::cli_abort(
 "The 'datos_auditoria' object must contain 'res_auditoria' and 'observaciones'."
 )
