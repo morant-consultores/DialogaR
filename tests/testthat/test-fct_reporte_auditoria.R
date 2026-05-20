@@ -23,6 +23,17 @@ test_that("crear_workbook_auditoria handles valid inputs and creates workbook", 
       fecha = as.Date("2026-03-26"),
       observaciones = "Todo bien",
       dictamenFinal = "Aprobada"
+    ),
+     res_auditoria_hist = tibble::tibble(
+      nombre_brigada = "BRIGADA 1",
+      nombre_completo = "JUAN PEREZ",
+      usuario_num = "101",
+      status = TRUE,
+      `Promedio de evaluaciones` = 25.5,
+      dialogos_auditados = 100,
+      eliminados = 0,
+      efectivos = 400,
+      fecha_ultimo_registro = as.Date("2026-03-26")
     )
   )
 
