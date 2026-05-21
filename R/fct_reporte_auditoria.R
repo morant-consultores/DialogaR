@@ -13,6 +13,74 @@
 # - No hardcodear credenciales. Usar .Renviron
 # - Los datos resultantes se consideran activos de información tipo A
 # -------------------------------------------------------------------------
+
+#' Encontrar fecha exacta hacia el pasado basada en un día de la semana
+#'
+#' @description
+#' Calcula de forma retrospectiva la fecha de un día de la semana específico 
+#' (ej. "lunes", "domingo") más cercano en el pasado o igual con respecto a una fecha de referencia.
+#' Si la fecha de referencia coincide con el día objetivo, retrocede una semana completa (7 días).
+#'
+#' @param referencia Objeto de clase \code{Date}. La fecha base a partir de la cual se buscará hacia atrás.
+#' @param nombre_dia Caracter. El nombre del día de la semana que se desea encontrar (ej. "lunes", "domingo", "miércoles"). No distingue entre mayúsculas, minúsculas o acentos.
+#'
+#' @return Un objeto de clase \code{Date} con la fecha exacta calculada.
+#' 
+#' @seealso \code{\link[lubridate]{wday}}
+#' 
+#' @examples
+#' \dontrun{
+#' # Si el corte es un viernes y queremos el lunes previo:
+#' encontrar_fecha_exacta(as.Date("2026-05-15"), "lunes")
+#' }
+#' 
+#' @importFrom lubridate wday
+#' @keywords internal
+#' 
+#' 
+  encontrar_fecha_exacta <- function(referencia, nombre_dia) {
+    dias_ref <- c("lunes" = 1, "martes" = 2, "miercoles" = 3, "miércoles" = 3,
+                  "jueves" = 4, "viernes" = 5, "sabado" = 6, "sábado" = 6, "domingo" = 7)
+    target_num <- dias_ref[tolower(nombre_dia)]
+    actual_num <- lubridate::wday(referencia, week_start = 1)
+    diff <- actual_num - target_num
+    if (diff < 0) diff <- diff + 7
+    if (diff == 0) diff <- 7
+    return(referencia - diff)
+  } 
+#' Ensamblar estructura operativa con métricas de producción
+#'
+#' @description
+#' Cruza la estructura limpia del personal (voceros, coordinadores, supervisores) con 
+#' un data frame de métricas recolectadas, asegurando consolidar tanto la actividad de los 
+#' voceros activos como la jerarquía de los coordinadores y supervisores en una sola estructura unificada.
+#'
+#' @param stats_df Data frame o tibble. Contiene las métricas calculadas por usuario (debe incluir la columna \code{usuario_num}).
+#' @param bd_aux_clean Data frame o tibble. Estructura operativa depurada de la organización que contiene columnas como \code{vocero}, \code{status_vocero}, \code{nombre_coordinador}, \code{supervisor}, entre otras.
+#' @param coord_nums Vector numérico o de caracteres. Lista de identificadores (\code{num}) que corresponden exclusivamente al cargo de "Coordinador de Brigada".
+#'
+#' @return Un \code{data.frame} o tibble consolidado y sin duplicados con la estructura jerárquica y métricas asociadas.
+#' 
+#' @importFrom dplyr filter left_join transmute distinct bind_rows join_by
+#' @keywords internal
+ensamblar_estructura <- function(stats_df, bd_aux_clean, coord_nums) {
+  rv <- bd_aux_clean |>
+    dplyr::filter(!is.na(vocero), (status_vocero == TRUE) | (vocero %in% stats_df$usuario_num)) |>
+    dplyr::left_join(stats_df, by = dplyr::join_by(vocero == usuario_num))
+  
+  rs <- bd_aux_clean |>
+    dplyr::transmute(municipio, distrito, nombre_brigada, nombre_coordinador, supervisor,
+                     status_coord, nombre_vocero = nombre_coordinador, vocero = supervisor, status_vocero = status_coord) |>
+    dplyr::filter(status_coord == TRUE | vocero %in% stats_df$usuario_num) |>
+    dplyr::distinct(distrito, nombre_coordinador, .keep_all = TRUE) |>
+    dplyr::filter(vocero %in% coord_nums) |>
+    dplyr::left_join(stats_df, by = dplyr::join_by(vocero == usuario_num))
+  
+  sup_list <- unique(rs$vocero[!is.na(rs$vocero)])
+  dplyr::bind_rows(rs, rv |> dplyr::filter(!vocero %in% sup_list)) |> 
+    dplyr::distinct()
+}
+
 #' Generar Reporte de Métricas de Auditoría y Producción
 #'
 #' @description
@@ -73,34 +141,6 @@
 #' 
 #'
 #' 
-
-  encontrar_fecha_exacta <- function(referencia, nombre_dia) {
-    dias_ref <- c("lunes" = 1, "martes" = 2, "miercoles" = 3, "miércoles" = 3,
-                  "jueves" = 4, "viernes" = 5, "sabado" = 6, "sábado" = 6, "domingo" = 7)
-    target_num <- dias_ref[tolower(nombre_dia)]
-    actual_num <- lubridate::wday(referencia, week_start = 1)
-    diff <- actual_num - target_num
-    if (diff < 0) diff <- diff + 7
-    if (diff == 0) diff <- 7
-    return(referencia - diff)
-  } 
-ensamblar_estructura <- function(stats_df, bd_aux_clean, coord_nums) {
-  rv <- bd_aux_clean |>
-    dplyr::filter(!is.na(vocero), (status_vocero == TRUE) | (vocero %in% stats_df$usuario_num)) |>
-    dplyr::left_join(stats_df, by = dplyr::join_by(vocero == usuario_num))
-  
-  rs <- bd_aux_clean |>
-    dplyr::transmute(municipio, distrito, nombre_brigada, nombre_coordinador, supervisor,
-                     status_coord, nombre_vocero = nombre_coordinador, vocero = supervisor, status_vocero = status_coord) |>
-    dplyr::filter(status_coord == TRUE | vocero %in% stats_df$usuario_num) |>
-    dplyr::distinct(distrito, nombre_coordinador, .keep_all = TRUE) |>
-    dplyr::filter(vocero %in% coord_nums) |>
-    dplyr::left_join(stats_df, by = dplyr::join_by(vocero == usuario_num))
-  
-  sup_list <- unique(rs$vocero[!is.na(rs$vocero)])
-  dplyr::bind_rows(rs, rv |> dplyr::filter(!vocero %in% sup_list)) |> 
-    dplyr::distinct()
-}
 
 
 generar_reporte_metricas <- function(pool, 

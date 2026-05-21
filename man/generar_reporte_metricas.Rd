@@ -9,14 +9,14 @@ generar_reporte_metricas(
   insumos,
   bd_completa,
   bd_aux,
-  id_proyecto,
+  encuesta_id,
   corte,
   inicio_semanal = "lunes",
   fin_semanal = "domingo",
   simular_domingo = FALSE,
   excluir_brigadas = NULL,
   filtrar_historicos = FALSE,
-  path_historicos = path_historicos
+  path_historicos = NULL
 )
 }
 \arguments{
@@ -28,7 +28,7 @@ generar_reporte_metricas(
 
 \item{bd_aux}{Data frame o tibble con la estructura operativa (voceros, coordinadores, supervisores y brigadas).}
 
-\item{id_proyecto}{Identificador numérico o caracter del proyecto a evaluar (actualmente reservado para futuras extensiones).}
+\item{encuesta_id}{Identificador numérico o caracter del proyecto a evaluar (actualmente reservado para futuras extensiones).}
 
 \item{corte}{Fecha o string equivalente (\code{YYYY-MM-DD}) que define el límite superior para la auditoría semanal.}
 
@@ -43,11 +43,11 @@ generar_reporte_metricas(
 \item{filtrar_historicos}{Lógico. Si es \code{TRUE}, los promedios históricos se calcularán basándose únicamente en los IDs guardados en el archivo RDS acumulado, el cual también se actualizará con los registros de esta semana. Por defecto es \code{FALSE}.}
 }
 \value{
-Una \code{lista} con tres elementos (tibbles):
-\desc{
+Una \code{lista} con tres elementos:
+\describe{
 \item{res_auditoria}{Métricas resumidas de la semana actual por vocero/brigada.}
-\item{observaciones}{Detalle de comentarios y dictámenes individuales de la semana.}
-\item{res_auditoria_hist}{Métricas resumidas históricas (totales o filtradas por el RDS) por vocero/brigada.}
+\item{observaciones}{Detalle de comentarios y dictámenes individuales.}
+\item{res_auditoria_hist}{Métricas resumidas históricas por vocero/brigada.}
 }
 }
 \description{
@@ -57,18 +57,28 @@ listas para reporte. Opcionalmente, actualiza y filtra un archivo histórico loc
 Este reporte está construido de dos periodos de tiempo. La columna efectivos retrocede al reporte semanal inmediato previo y expone esos valores.
 Mientras que los vals de auditoría corresponden a la semana natural corriente del reporte (lunes a domingo)
 }
+\section{Seguridad y Privacidad}{
+
+Nivel de datos: INTERNO (estructura operativa de brigadas y voceros).
+No registrar columnas de usuarios en logs ni mensajes de error.
+Control ISO 27001: A.8.2 (Clasificación de información).
+}
+
 \examples{
 \dontrun{
 # Ejemplo de uso típico:
+
+
 reportes <- generar_reporte_metricas(
   pool = mi_conexion, 
   insumos = lista_insumos, 
   bd_completa = df_produccion, 
   bd_aux = df_estructura, 
   corte = "2026-05-15",
-  filtrar_historicos = TRUE
+  filtrar_historicos = FALSE
 )
 }
+
 
 
 
