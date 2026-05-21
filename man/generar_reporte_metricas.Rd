@@ -9,69 +9,76 @@ generar_reporte_metricas(
   insumos,
   bd_completa,
   bd_aux,
-  id_proyecto,
+  encuesta_id,
   corte,
   inicio_semanal = "lunes",
   fin_semanal = "domingo",
   simular_domingo = FALSE,
   excluir_brigadas = NULL,
   filtrar_historicos = FALSE,
-  path_historicos = path_historicos
+  path_historicos = NULL
 )
 }
 \arguments{
-\item{pool}{Objeto de conexión \code{pool} a la base de datos relacional (contiene la tabla \code{EvaluacionRegistro}).}
+\item{pool}{Objeto de conexión \code{pool} a la base de datos relacional.}
 
-\item{insumos}{Lista que contiene catálogos base; debe incluir \code{cat$usuarios} con el rol de los integrantes.}
+\item{insumos}{Lista con catálogos base; debe incluir \code{cat$usuarios} con el rol de los integrantes.}
 
 \item{bd_completa}{Data frame o tibble con el histórico de producción y desgloses de efectividad.}
 
 \item{bd_aux}{Data frame o tibble con la estructura operativa (voceros, coordinadores, supervisores y brigadas).}
 
-\item{id_proyecto}{Identificador numérico o caracter del proyecto a evaluar (actualmente reservado para futuras extensiones).}
+\item{encuesta_id}{Vector. Identificador(es) de encuesta para filtrar la tabla \code{Registros} en la base de datos.}
 
-\item{corte}{Fecha o string equivalente (\code{YYYY-MM-DD}) que define el límite superior para la auditoría semanal.}
+\item{corte}{Fecha o string (\code{YYYY-MM-DD}) que define el límite superior para la auditoría semanal.}
 
-\item{inicio_semanal}{Caracter. Día de la semana en que inicia el periodo efectivo (ej. "lunes"). Por defecto es "lunes".}
+\item{inicio_semanal}{Caracter. Día de inicio del periodo efectivo (ej. \code{"lunes"}). Por defecto \code{"lunes"}.}
 
-\item{fin_semanal}{Caracter. Día de la semana en que cierra el periodo efectivo (ej. "domingo"). Por defecto es "domingo".}
+\item{fin_semanal}{Caracter. Día de cierre del periodo efectivo (ej. \code{"domingo"}). Por defecto \code{"domingo"}.}
 
-\item{simular_domingo}{Lógico. Si es \code{TRUE}, ajusta automáticamente la fecha de corte al domingo de esa misma semana. Por defecto es \code{FALSE}.}
+\item{simular_domingo}{Lógico. Si \code{TRUE}, ajusta el corte al domingo de esa misma semana. Por defecto \code{FALSE}.}
 
-\item{excluir_brigadas}{Vector de caracteres. Nombres o patrones de brigadas que se desean excluir del reporte final. Por defecto es \code{NULL}.}
+\item{excluir_brigadas}{Vector de caracteres. Nombres o patrones de brigadas a excluir del reporte. Por defecto \code{NULL}.}
 
-\item{filtrar_historicos}{Lógico. Si es \code{TRUE}, los promedios históricos se calcularán basándose únicamente en los IDs guardados en el archivo RDS acumulado, el cual también se actualizará con los registros de esta semana. Por defecto es \code{FALSE}.}
+\item{filtrar_historicos}{Lógico. Si \code{TRUE}, los promedios históricos se calculan solo con los IDs del RDS acumulado, que también se actualiza con los registros de esta semana. Por defecto \code{FALSE}.}
+
+\item{path_historicos}{Ruta al archivo \code{.rds} que acumula los IDs históricos. Requerido cuando \code{filtrar_historicos = TRUE}. Por defecto \code{NULL}.}
 }
 \value{
-Una \code{lista} con tres elementos (tibbles):
-\desc{
+Una \code{lista} con tres elementos:
+\describe{
 \item{res_auditoria}{Métricas resumidas de la semana actual por vocero/brigada.}
 \item{observaciones}{Detalle de comentarios y dictámenes individuales de la semana.}
-\item{res_auditoria_hist}{Métricas resumidas históricas (totales o filtradas por el RDS) por vocero/brigada.}
+\item{res_auditoria_hist}{Métricas resumidas históricas por vocero/brigada.}
 }
 }
 \description{
-Procesa y consolida la información de producción semanal e histórica de los voceros y coordinadores,
-cruza los datos con las evaluaciones de auditoría almacenadas en la base de datos y genera estructuras
-listas para reporte. Opcionalmente, actualiza y filtra un archivo histórico local en formato RDS.
-Este reporte está construido de dos periodos de tiempo. La columna efectivos retrocede al reporte semanal inmediato previo y expone esos valores.
-Mientras que los vals de auditoría corresponden a la semana natural corriente del reporte (lunes a domingo)
+Procesa y consolida la información de producción semanal e histórica de voceros y
+coordinadores, cruza los datos con las evaluaciones de auditoría almacenadas en la
+base de datos y genera estructuras listas para reporte. Opcionalmente actualiza y
+filtra un archivo histórico local en formato RDS.
+
+Este reporte trabaja con dos periodos de tiempo: la columna \code{efectivos} refleja
+la semana inmediata previa, mientras que los valores de auditoría corresponden a
+la semana natural corriente (lunes a domingo).
 }
+\section{Seguridad y Privacidad}{
+
+Nivel de datos: INTERNO (estructura operativa de brigadas y voceros).
+No registrar columnas de usuarios en logs ni mensajes de error.
+Control ISO 27001: A.8.2 (Clasificación de información).
+}
+
 \examples{
 \dontrun{
-# Ejemplo de uso típico:
 reportes <- generar_reporte_metricas(
-  pool = mi_conexion, 
-  insumos = lista_insumos, 
-  bd_completa = df_produccion, 
-  bd_aux = df_estructura, 
+  pool = mi_conexion,
+  insumos = lista_insumos,
+  bd_completa = df_produccion,
+  bd_aux = df_estructura,
+  encuesta_id = 1L,
   corte = "2026-05-15",
-  filtrar_historicos = TRUE
+  filtrar_historicos = FALSE
 )
 }
-
-
-
-
-
 }
