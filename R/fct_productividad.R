@@ -833,8 +833,7 @@ generar_tablas_reporte <- function(bd_prod) {
   }
 
   por_brigada <- por_brigada |>
-    filter(usuarios > 0) |>
-    mutate(promedio = round(dialogos / usuarios, 2))
+    mutate(promedio = round(dialogos / if_else(usuarios == 0, NA_real_, usuarios), 2))
 
   tabla_acumulada <- bind_rows(
     general     |> mutate(.ord0 = 0, .ord2 = 0),
