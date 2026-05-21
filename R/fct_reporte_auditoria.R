@@ -223,7 +223,7 @@ evaluacion_raw <- dplyr::tbl(pool, "EvaluacionRegistro") |>
     ) |>
     tidyr::unnest_wider(json_parseado)
   
-  evaluacion_sem <- evaluacion_raw |> dplyr::filter(fecha >= fecha_inicio_au & fecha < fecha_fin_au)
+  evaluacion_sem <- evaluacion_raw |> dplyr::filter(fecha >= fecha_inicio_au & fecha <= fecha_fin_au)
 
   # --- 5.1 LÓGICA DE ACTUALIZACIÓN DEL ARCHIVO DE HISTÓRICOS (.RDS) ---
   if (filtrar_historicos && is.null(path_historicos)) {
