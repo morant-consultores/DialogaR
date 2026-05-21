@@ -216,6 +216,27 @@ test_that("generar_tablas_reporte incluye correctamente brigada con coordinador 
   expect_equal(fila$usuarios, 2L)    # ambas filas tienen dialogos > 0
 })
 
+test_that("generar_tablas_reporte incluye brigadas con 0 diálogos en el día de corte", {
+  bd_prod <- tibble::tibble(
+    nombre_brigada          = c("BRIGADA ACTIVA", "BRIGADA SIN DIALOGO"),
+    nombre_coordinador      = c("COORD A",        "COORD B"),
+    nombre_vocero           = c("VOC 001",         "VOC 002"),
+    municipio               = c("Norte",           "Sur"),
+    dialogos_efectivos_nube = c(5L,                0L),
+    tiene_pase_lista        = c(TRUE,              FALSE),
+    numero_pases_lista      = c(1L,                0L)
+  )
+
+  resultado <- expect_no_error(generar_tablas_reporte(bd_prod))
+
+  expect_true("BRIGADA ACTIVA"      %in% resultado$cruda$nombre)
+  expect_true("BRIGADA SIN DIALOGO" %in% resultado$cruda$nombre)
+
+  fila_cero <- dplyr::filter(resultado$cruda, nombre == "BRIGADA SIN DIALOGO")
+  expect_equal(fila_cero$dialogos, 0L)
+  expect_equal(fila_cero$promedio, 0)  # NA reemplazado por 0 en tabla_acumulada
+})
+
 # =========================================================================
 # TESTS: crear_tabla_usuarios (funciones_pdf.R)
 # =========================================================================
