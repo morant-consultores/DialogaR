@@ -11,6 +11,7 @@ make_bd_completa_m <- function(fecha_ini, fecha_fin_arg) {
     usuario_num      = "001",
     desglose         = "Efectivo",
     duracion_minutos = 12,
+    encuesta_id      = 1L,
     fecha_inicio     = as.POSIXct(paste(as.character(fechas), "08:00:00")),
     fecha_fin        = as.POSIXct(paste(as.character(fechas), "14:00:00"))
   )
@@ -70,6 +71,7 @@ make_bd_completa_multi <- function(fechas, usuario_nums) {
     usuario_num      = usuario_nums,
     desglose         = "Efectivo",
     duracion_minutos = 10,
+    encuesta_id      = 1L,
     fecha_inicio     = as.POSIXct(paste(as.character(fechas), "08:00:00")),
     fecha_fin        = as.POSIXct(paste(as.character(fechas), "14:00:00"))
   )
@@ -171,6 +173,7 @@ test_that("generar_reporte_brigadas imputes SIN ASIGNAR for voceros with no coor
     usuario_num      = "999",
     desglose         = "Efectivo",
     duracion_minutos = 10,
+    encuesta_id      = 1L,
     fecha_inicio     = as.POSIXct(paste(as.character(corte), "08:00:00")),
     fecha_fin        = as.POSIXct(paste(as.character(corte), "14:00:00"))
   )
@@ -399,6 +402,7 @@ test_that("vocero activo que es supervisor de brigada de pruebas aparece como vo
     usuario_num      = "7911062889",
     desglose         = "Efectivo",
     duracion_minutos = 10,
+    encuesta_id      = 1L,
     fecha_inicio     = as.POSIXct(paste(as.character(fechas), "08:00:00")),
     fecha_fin        = as.POSIXct(paste(as.character(fechas), "14:00:00"))
   )
