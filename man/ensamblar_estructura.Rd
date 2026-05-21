@@ -7,18 +7,18 @@
 ensamblar_estructura(stats_df, bd_aux_clean, coord_nums)
 }
 \arguments{
-\item{stats_df}{Data frame o tibble. Contiene las métricas calculadas por usuario (debe incluir la columna \code{usuario_num}).}
+\item{stats_df}{Data frame o tibble. Métricas calculadas por usuario (debe incluir \code{usuario_num}).}
 
-\item{bd_aux_clean}{Data frame o tibble. Estructura operativa depurada de la organización que contiene columnas como \code{vocero}, \code{status_vocero}, \code{nombre_coordinador}, \code{supervisor}, entre otras.}
+\item{bd_aux_clean}{Data frame o tibble. Estructura operativa depurada con columnas \code{vocero}, \code{status_vocero}, \code{nombre_coordinador}, \code{supervisor}, entre otras.}
 
-\item{coord_nums}{Vector numérico o de caracteres. Lista de identificadores (\code{num}) que corresponden exclusivamente al cargo de "Coordinador de Brigada".}
+\item{coord_nums}{Vector. Identificadores (\code{num}) de quienes tienen cargo "Coordinador de Brigada".}
 }
 \value{
-Un \code{data.frame} o tibble consolidado y sin duplicados con la estructura jerárquica y métricas asociadas.
+Tibble consolidado y sin duplicados con la estructura jerárquica y métricas asociadas.
 }
 \description{
 Cruza la estructura limpia del personal (voceros, coordinadores, supervisores) con
-un data frame de métricas recolectadas, asegurando consolidar tanto la actividad de los
-voceros activos como la jerarquía de los coordinadores y supervisores en una sola estructura unificada.
+un data frame de métricas recolectadas, consolidando tanto la actividad de los
+voceros activos como la jerarquía de coordinadores y supervisores en una estructura unificada.
 }
 \keyword{internal}

@@ -7,20 +7,23 @@
 crear_workbook_auditoria(datos_auditoria)
 }
 \arguments{
-\item{datos_auditoria}{Una lista que debe contener obligatoriamente los elementos \code{res_auditoria},
-\code{observaciones} y \code{res_auditoria_hist}.}
+\item{datos_auditoria}{Lista. Salida de \code{generar_reporte_metricas()}. Debe contener
+\code{res_auditoria}, \code{observaciones} y \code{res_auditoria_hist}.}
 }
 \value{
-Un objeto de tipo \code{Workbook} (paquete \code{openxlsx}) listo para ser guardado con \code{saveWorkbook}.
+Un objeto \code{Workbook} de \pkg{openxlsx} listo para guardarse con \code{saveWorkbook}.
 }
 \description{
-Toma la lista de datos generada por \code{\link{generar_reporte_metricas}} y construye un objeto Workbook
-de Excel con formato condicional de escala de colores (Rojo a Verde) para la columna "Promedio de evaluaciones".
+Toma la lista generada por \code{\link{generar_reporte_metricas}} y construye un objeto
+Workbook de Excel con formato condicional de escala de colores (Rojo a Verde) en la
+columna "Promedio de evaluaciones" de las hojas semanal e histórica.
+
+\strong{Nota:} Esta función no guarda el archivo en disco. Retorna el objeto en memoria
+para que pueda pasarse a funciones de subida o guardado.
 }
 \examples{
 \dontrun{
 wb <- crear_workbook_auditoria(reportes)
 openxlsx::saveWorkbook(wb, "Reporte_Auditoria.xlsx", overwrite = TRUE)
 }
-
 }

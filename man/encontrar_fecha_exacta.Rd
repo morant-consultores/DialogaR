@@ -9,19 +9,18 @@ encontrar_fecha_exacta(referencia, nombre_dia)
 \arguments{
 \item{referencia}{Objeto de clase \code{Date}. La fecha base a partir de la cual se buscará hacia atrás.}
 
-\item{nombre_dia}{Caracter. El nombre del día de la semana que se desea encontrar (ej. "lunes", "domingo", "miércoles"). No distingue entre mayúsculas, minúsculas o acentos.}
+\item{nombre_dia}{Caracter. El nombre del día de la semana que se desea encontrar (ej. "lunes", "domingo", "miércoles"). No distingue mayúsculas ni acentos.}
 }
 \value{
 Un objeto de clase \code{Date} con la fecha exacta calculada.
 }
 \description{
 Calcula de forma retrospectiva la fecha de un día de la semana específico
-(ej. "lunes", "domingo") más cercano en el pasado o igual con respecto a una fecha de referencia.
+(ej. "lunes", "domingo") más cercano en el pasado con respecto a una fecha de referencia.
 Si la fecha de referencia coincide con el día objetivo, retrocede una semana completa (7 días).
 }
 \examples{
 \dontrun{
-# Si el corte es un viernes y queremos el lunes previo:
 encontrar_fecha_exacta(as.Date("2026-05-15"), "lunes")
 }
 
