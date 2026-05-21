@@ -1,14 +1,10 @@
-# -------------------------------------------------------------------------
-# PROYECTO: Morant Consultores
-# SCRIPT:   fct_reporte_auditoria.R
-# OBJETIVO: Crear el nuevo reporte auditoria
-# AUTOR:    Pedro Castro / Equipo de Análisis
-# FECHA:    2026-05-18
-# -------------------------------------------------------------------------
-# CLASIFICACIÓN: Interno
-# ORIGEN DATOS:  Fuentes de datos o tablas SQL
-# DEPENDENCIAS:  {dplyr, {dbplyr}, {readr}}
-# -------------------------------------------------------------------------
+# ============================================================
+# Módulo    : fct_reporte_auditoria
+# Propósito : Generación del reporte de métricas de auditoría y producción
+# Datos     : INTERNO
+# Control   : A.8.2 (Clasificación), A.9.4 (Control de acceso)
+# Revisión  : 2026-05-21
+# ============================================================
 # NOTAS DE SEGURIDAD:
 # - No hardcodear credenciales. Usar .Renviron
 # - Los datos resultantes se consideran activos de información tipo A
@@ -26,7 +22,7 @@
 #' @param insumos Lista que contiene catálogos base; debe incluir `cat$usuarios` con el rol de los integrantes.
 #' @param bd_completa Data frame o tibble con el histórico de producción y desgloses de efectividad.
 #' @param bd_aux Data frame o tibble con la estructura operativa (voceros, coordinadores, supervisores y brigadas).
-#' @param encuesta_id Identificador numérico o caracter del proyecto a evaluar (actualmente reservado para futuras extensiones).
+#' @param id_proyecto Identificador numérico o caracter del proyecto a evaluar (actualmente reservado para futuras extensiones).
 #' @param corte Fecha o string equivalente (`YYYY-MM-DD`) que define el límite superior para la auditoría semanal.
 #' @param inicio_semanal Caracter. Día de la semana en que inicia el periodo efectivo (ej. "lunes"). Por defecto es "lunes".
 #' @param fin_semanal Caracter. Día de la semana en que cierra el periodo efectivo (ej. "domingo"). Por defecto es "domingo".
@@ -34,46 +30,62 @@
 #' @param excluir_brigadas Vector de caracteres. Nombres o patrones de brigadas que se desean excluir del reporte final. Por defecto es `NULL`.
 #' @param filtrar_historicos Lógico. Si es `TRUE`, los promedios históricos se calcularán basándose únicamente en los IDs guardados en el archivo RDS acumulado, el cual también se actualizará con los registros de esta semana. Por defecto es `FALSE`.
 #'
-#' @return Una `lista` con tres elementos:
+#' @param path_historicos Ruta al archivo `.rds` que acumula los IDs históricos. Requerido cuando `filtrar_historicos = TRUE`. Por defecto es `NULL`.
+#'
+#' @return Una `lista` con tres elementos (tibbles):
 #' \describe{
 #'   \item{res_auditoria}{Métricas resumidas de la semana actual por vocero/brigada.}
-#'   \item{observaciones}{Detalle de comentarios y dictámenes individuales.}
-#'   \item{res_auditoria_hist}{Métricas resumidas históricas por vocero/brigada.}
+#'   \item{observaciones}{Detalle de comentarios y dictámenes individuales de la semana.}
+#'   \item{res_auditoria_hist}{Métricas resumidas históricas (totales o filtradas por el RDS) por vocero/brigada.}
 #' }
-#' 
-#' @export
-#' @importFrom dplyr mutate filter summarise arrange distinct left_join inner_join bind_rows transmute select rename relocate n ...
-#' @importFrom lubridate ceiling_date floor_date wday with_tz
-#' @importFrom tidyr replace_na complete nesting unnest_wider
-#' @importFrom cli cli_alert_info cli_inform cli_alert_success
-#' @importFrom jsonlite fromJSON
-#' @importFrom readr read_rds write_rds
+#'
 #' @section Seguridad y Privacidad:
 #' Nivel de datos: INTERNO (estructura operativa de brigadas y voceros).
 #' No registrar columnas de usuarios en logs ni mensajes de error.
 #' Control ISO 27001: A.8.2 (Clasificación de información).
+#'
+#' @export
+#' @importFrom dplyr mutate filter summarise arrange distinct left_join inner_join bind_rows transmute select rename relocate n if_else across
+#' @importFrom lubridate ceiling_date floor_date wday with_tz
+#' @importFrom tidyr replace_na complete nesting unnest_wider
+#' @importFrom cli cli_alert_info cli_inform cli_alert_success cli_abort
+#' @importFrom jsonlite fromJSON
+#' @importFrom purrr map
+#' @importFrom readr read_rds write_rds
+#'
 #' @examples
 #' \dontrun{
 #' # Ejemplo de uso típico:
-#' 
-#' 
-#
 #' reportes <- generar_reporte_metricas(
 #'   pool = mi_conexion, 
 #'   insumos = lista_insumos, 
 #'   bd_completa = df_produccion, 
 #'   bd_aux = df_estructura, 
 #'   corte = "2026-05-15",
-#'   filtrar_historicos = FALSE
+#'   filtrar_historicos = TRUE
 #' )
 #' }
 #'
-#' 
-#'
-#' 
-#'
-#' 
-
+generar_reporte_metricas <- function(pool, 
+                                     insumos, 
+                                     bd_completa, 
+                                     bd_aux, 
+                                     id_proyecto, 
+                                     corte, 
+                                     inicio_semanal = "lunes", 
+                                     fin_semanal = "domingo", 
+                                     simular_domingo = FALSE,
+                                     excluir_brigadas = NULL,
+                                     filtrar_historicos = FALSE,
+                                    path_historicos = NULL) {
+  
+  # --- 1. LÓGICA DE FECHAS ---
+  corte_dt <- as.Date(corte)
+  if (simular_domingo) {
+    corte_dt <- lubridate::ceiling_date(corte_dt, unit = "week", week_start = 1) - 1
+    cli::cli_alert_info("Modo prueba: corte ajustado a {corte_dt} (domingo)")
+  }
+  
   encontrar_fecha_exacta <- function(referencia, nombre_dia) {
     dias_ref <- c("lunes" = 1, "martes" = 2, "miercoles" = 3, "miércoles" = 3,
                   "jueves" = 4, "viernes" = 5, "sabado" = 6, "sábado" = 6, "domingo" = 7)
@@ -83,46 +95,7 @@
     if (diff < 0) diff <- diff + 7
     if (diff == 0) diff <- 7
     return(referencia - diff)
-  } 
-ensamblar_estructura <- function(stats_df, bd_aux_clean, coord_nums) {
-  rv <- bd_aux_clean |>
-    dplyr::filter(!is.na(vocero), (status_vocero == TRUE) | (vocero %in% stats_df$usuario_num)) |>
-    dplyr::left_join(stats_df, by = dplyr::join_by(vocero == usuario_num))
-  
-  rs <- bd_aux_clean |>
-    dplyr::transmute(municipio, distrito, nombre_brigada, nombre_coordinador, supervisor,
-                     status_coord, nombre_vocero = nombre_coordinador, vocero = supervisor, status_vocero = status_coord) |>
-    dplyr::filter(status_coord == TRUE | vocero %in% stats_df$usuario_num) |>
-    dplyr::distinct(distrito, nombre_coordinador, .keep_all = TRUE) |>
-    dplyr::filter(vocero %in% coord_nums) |>
-    dplyr::left_join(stats_df, by = dplyr::join_by(vocero == usuario_num))
-  
-  sup_list <- unique(rs$vocero[!is.na(rs$vocero)])
-  dplyr::bind_rows(rs, rv |> dplyr::filter(!vocero %in% sup_list)) |> 
-    dplyr::distinct()
-}
-
-
-generar_reporte_metricas <- function(pool, 
-                                     insumos, 
-                                     bd_completa, 
-                                     bd_aux, 
-                                     encuesta_id, 
-                                     corte, 
-                                     inicio_semanal = "lunes", 
-                                     fin_semanal = "domingo", 
-                                     simular_domingo = FALSE,
-                                     excluir_brigadas = NULL,
-                                     filtrar_historicos = FALSE,
-                                    path_historicos = NULL) { # <-- Nuevo parámetro condicional
-  
-  # --- 1. LÓGICA DE FECHAS ---
-  corte_dt <- as.Date(corte)
-  if (simular_domingo) {
-    corte_dt <- lubridate::ceiling_date(corte_dt, unit = "week", week_start = 1) - 1
-    cli::cli_alert_info("Modo prueba: corte ajustado a {corte_dt} (domingo)")
   }
-  
   
   fecha_inicio_au <- lubridate::floor_date(corte_dt, unit = "week", week_start = 1)
   fecha_fin_au    <- corte_dt
@@ -130,18 +103,21 @@ generar_reporte_metricas <- function(pool,
   fecha_inicio_ef <- encontrar_fecha_exacta(fecha_fin_ef, inicio_semanal)
   rango_fechas    <- seq.Date(fecha_inicio_ef, fecha_fin_ef, by = "day")
   
- if (fecha_fin_ef > fecha_fin_au) {
-  cli::cli_abort(c(
-    "Inconsistencia en fechas calculadas.",
-    "i" = "fecha_fin_ef ({fecha_fin_ef}) no puede ser posterior a fecha_fin_au ({fecha_fin_au})."
-  ))
-}
-if (fecha_inicio_ef > fecha_fin_ef) {
-  cli::cli_abort(c(
-    "Inconsistencia en fechas calculadas.",
-    "i" = "fecha_inicio_ef ({fecha_inicio_ef}) no puede ser posterior a fecha_fin_ef ({fecha_fin_ef})."
-  ))
-}
+  if (fecha_fin_ef > fecha_fin_au) {
+    cli::cli_abort(c(
+      "Inconsistencia en fechas calculadas.",
+      "i" = "fecha_fin_ef ({fecha_fin_ef}) no puede ser posterior a fecha_fin_au ({fecha_fin_au})."
+    ))
+  }
+  if (fecha_inicio_ef > fecha_fin_ef) {
+    cli::cli_abort(c(
+      "Inconsistencia en fechas calculadas.",
+      "i" = "fecha_inicio_ef ({fecha_inicio_ef}) no puede ser posterior a fecha_fin_ef ({fecha_fin_ef})."
+    ))
+  }
+  if (simular_domingo && lubridate::wday(fecha_fin_au, week_start = 1) != 7) {
+    cli::cli_abort("simular_domingo = TRUE pero fecha_fin_au ({fecha_fin_au}) no es domingo.")
+  }
   
   cli::cli_inform(c(
     "v" = "Intervalos de fecha calculados:",
@@ -175,10 +151,27 @@ if (fecha_inicio_ef > fecha_fin_ef) {
     )
 
   # Función de apoyo para ensamblar voceros/supervisores
- 
+  ensamblar_estructura <- function(stats_df) {
+    rv <- bd_aux_clean |>
+      dplyr::filter(!is.na(vocero), (status_vocero == TRUE) | (vocero %in% stats_df$usuario_num)) |>
+      dplyr::left_join(stats_df, by = dplyr::join_by(vocero == usuario_num))
+    
+    rs <- bd_aux_clean |>
+      dplyr::transmute(municipio, distrito, nombre_brigada, nombre_coordinador, supervisor,
+                       status_coord, nombre_vocero = nombre_coordinador, vocero = supervisor, status_vocero = status_coord) |>
+      dplyr::filter(status_coord == TRUE | vocero %in% stats_df$usuario_num) |>
+      dplyr::distinct(distrito, nombre_coordinador, .keep_all = TRUE) |>
+      dplyr::filter(vocero %in% coord_nums) |>
+      dplyr::left_join(stats_df, by = dplyr::join_by(vocero == usuario_num))
+    
+    sup_list <- unique(rs$vocero[!is.na(rs$vocero)])
+    dplyr::bind_rows(rs, rv |> dplyr::filter(!vocero %in% sup_list)) |> 
+      dplyr::distinct()
+  }
+
   # --- 4. CREACIÓN DE HOJAS DE REGISTROS ---
   # Semanal
-  hoja_registros_sem <-ensamblar_estructura(stats_sem, bd_aux_clean, coord_nums)|>
+  hoja_registros_sem <- ensamblar_estructura(stats_sem) |>
     dplyr::filter(!(nombre_brigada == "SIN ASIGNAR" & !vocero %in% stats_sem$usuario_num)) |>
     tidyr::complete(
       tidyr::nesting(municipio, distrito, nombre_brigada, nombre_coordinador, 
@@ -194,23 +187,20 @@ if (fecha_inicio_ef > fecha_fin_ef) {
     dplyr::select(nombre_brigada, nombre_vocero, vocero, status_vocero, efectivos, fecha_ultimo_registro)
 
   # Histórica
-  hoja_registros_hist_base <- ensamblar_estructura(stats_hist_base, bd_aux_clean, coord_nums)|>
+  hoja_registros_hist_base <- ensamblar_estructura(stats_hist_base) |>
     dplyr::filter(!(nombre_brigada == "SIN ASIGNAR" & !vocero %in% stats_hist_base$usuario_num)) |>
     dplyr::transmute(nombre_brigada, nombre_vocero, vocero, status_vocero, 
                      efectivos = efectivos_totales, 
                      fecha_ultimo_registro = fecha_ultimo_reg_hist)
 
   # --- 5. PROCESAMIENTO DE AUDITORÍAS ---
-  registros_id_hist <- dplyr::tbl(pool, "Registros") |> 
-    dplyr::filter(EncuestaId %in% encuesta_id) |> 
-    dplyr::transmute(id = Id, 
-      usuario_num = UsuarioNum)
-
-
-
-evaluacion_raw <- dplyr::tbl(pool, "EvaluacionRegistro") |>
-    dplyr::inner_join(registros_id_hist, by = dplyr::join_by(RegistroId == id)) |> 
-  dplyr::collect() |>
+  registros_id_hist <- bd_completa |>
+    dplyr::summarise(fecha = min(fecha, na.rm = TRUE), usuario_num = dplyr::first(usuario_num), .by = id) |>
+    dplyr::transmute(id = as.integer(id), usuario_num)
+  
+  evaluacion_raw <- dplyr::tbl(pool, "EvaluacionRegistro") |>
+    dplyr::collect() |>
+    dplyr::inner_join(registros_id_hist, by = dplyr::join_by(RegistroId == id)) |>
     dplyr::mutate(
       json_parseado = purrr::map(Resultado, \(x) {
         lista_cruda <- jsonlite::fromJSON(x); lista_limpia <- purrr::map(lista_cruda, \(item) {
@@ -227,9 +217,9 @@ evaluacion_raw <- dplyr::tbl(pool, "EvaluacionRegistro") |>
 
   # --- 5.1 LÓGICA DE ACTUALIZACIÓN DEL ARCHIVO DE HISTÓRICOS (.RDS) ---
   if (filtrar_historicos && is.null(path_historicos)) {
-  cli::cli_abort("`path_historicos` es requerido cuando `filtrar_historicos = TRUE`.")
+    cli::cli_abort("`path_historicos` es requerido cuando `filtrar_historicos = TRUE`.")
   }
-  
+
   if (filtrar_historicos) {
     # 1. Extraer los IDs de esta semana como un vector numérico plano
     reg_semana <- evaluacion_sem |> dplyr::pull(RegistroId)
@@ -343,59 +333,44 @@ evaluacion_raw <- dplyr::tbl(pool, "EvaluacionRegistro") |>
 #' }
 #' 
 crear_workbook_auditoria <- function(datos_auditoria) {
-  # 1. Validar que los datos tengan la estructura correcta (Fallo rápido / Fail-fast)
- if (!all(c("res_auditoria", "observaciones", "res_auditoria_hist") %in% names(datos_auditoria))) {
+  if (!all(c("res_auditoria", "observaciones", "res_auditoria_hist") %in% names(datos_auditoria))) {
     cli::cli_abort(
       "El objeto 'datos_auditoria' debe contener 'res_auditoria', 'observaciones' y 'res_auditoria_hist'."
     )
   }
 
-  # 2. Inicializar el libro de trabajo (workbook) y añadir las hojas
   wb <- openxlsx::createWorkbook()
   openxlsx::addWorksheet(wb, "res_auditoria")
   openxlsx::addWorksheet(wb, "observaciones")
   openxlsx::addWorksheet(wb, "res_auditoria_hist")
 
+  openxlsx::writeData(wb, "res_auditoria",      datos_auditoria$res_auditoria)
+  openxlsx::writeData(wb, "observaciones",       datos_auditoria$observaciones)
+  openxlsx::writeData(wb, "res_auditoria_hist",  datos_auditoria$res_auditoria_hist)
 
-  # 3. Escribir los datos en las hojas
-  openxlsx::writeData(wb, "res_auditoria", datos_auditoria$res_auditoria)
-  openxlsx::writeData(wb, "observaciones", datos_auditoria$observaciones)
-  openxlsx::writeData(wb, "res_auditoria_hist", datos_auditoria$res_auditoria_hist)
+  col_sem <- which(names(datos_auditoria$res_auditoria)      == "Promedio de evaluaciones")
+  col_hist <- which(names(datos_auditoria$res_auditoria_hist) == "Promedio de evaluaciones")
 
-
-  # 4. Aplicar formato condicional (Escala de colores)
-  col_total <- which(
-    names(datos_auditoria$res_auditoria) == "Promedio de evaluaciones"
-  )
-
-  if (length(col_total) > 0) {
+  if (length(col_sem) > 0) {
     openxlsx::conditionalFormatting(
-      wb,
-      sheet = "res_auditoria",
-      cols = col_total,
-      rows = 2:(nrow(datos_auditoria$res_auditoria) + 1), # +1 para tener en cuenta el encabezado
-      style = c("#FF0000", "#00FF00"), # Rojo a Verde
+      wb, sheet = "res_auditoria",
+      cols = col_sem,
+      rows = 2:(nrow(datos_auditoria$res_auditoria) + 1),
+      style = c("#FF0000", "#00FF00"),
       type = "colourScale"
     )
   }
 
-  col_total <- which(
-    names(datos_auditoria$res_auditoria_hist) == "Promedio de evaluaciones"
-  )
-
-  if (length(col_total) > 0) {
+  if (length(col_hist) > 0) {
     openxlsx::conditionalFormatting(
-      wb,
-      sheet = "res_auditoria_hist",
-      cols = col_total,
-      rows = 2:(nrow(datos_auditoria$res_auditoria_hist) + 1), # +1 para tener en cuenta el encabezado
-      style = c("#FF0000", "#00FF00"), # Rojo a Verde
+      wb, sheet = "res_auditoria_hist",
+      cols = col_hist,
+      rows = 2:(nrow(datos_auditoria$res_auditoria_hist) + 1),
+      style = c("#FF0000", "#00FF00"),
       type = "colourScale"
     )
   }
 
   cli::cli_alert_success("Libro de Excel creado exitosamente en memoria.")
-
-  # 5. Devolver el objeto a la sesión del usuario
   return(wb)
 }
