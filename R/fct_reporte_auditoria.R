@@ -155,37 +155,6 @@ generar_reporte_metricas <- function(pool,
   if (simular_domingo && lubridate::wday(fecha_fin_au, week_start = 1) != 7) {
     cli::cli_abort("simular_domingo = TRUE pero fecha_fin_au ({fecha_fin_au}) no es domingo.")
   }
-  
-  cli::cli_inform(c(
-    "v" = "Intervalos de fecha calculados:",
-    "i" = "Auditoría: {.val {fecha_inicio_au}} al {.val {fecha_fin_au}}",
-    "i" = "Efectivos: {.val {fecha_inicio_ef}} al {.val {fecha_fin_ef}}"
-  ))
-  
-  # --- 2. PREPARACIÓN ESTRUCTURA BASE ---
-  bd_aux_clean <- bd_aux |>
-    dplyr::mutate(dplyr::across(c(nombre_coordinador, supervisor, nombre_brigada), 
-                                ~tidyr::replace_na(.x, "SIN ASIGNAR"))) |>
-    dplyr::arrange(dplyr::desc(status_coord)) |>
-    dplyr::distinct(vocero, .keep_all = TRUE)
-  
-  coord_nums <- insumos$cat$usuarios |>
-    dplyr::filter(cargo == "Coordinador de Brigada") |>
-    dplyr::pull(num)
-
-  # --- 3. CÁLCULO DE PRODUCCIÓN (SEM VS HIST) ---
-  # Semanal (para completar fechas)
-  stats_sem <- bd_completa |>
-    dplyr::filter(fecha >= fecha_inicio_ef & fecha <= fecha_fin_ef) |>
-    dplyr::summarise(n = sum(desglose == "Efectivo", na.rm = TRUE), .by = c(usuario_num, fecha))
-
-  # Histórica (toda la base)
-  stats_hist_base <- bd_completa |>
-    dplyr::summarise(
-      efectivos_totales = sum(desglose == "Efectivo", na.rm = TRUE),
-      fecha_ultimo_reg_hist = as.Date(max(fecha, na.rm = TRUE)),
-      .by = usuario_num
-    )
 
   fecha_inicio_au <- lubridate::floor_date(corte_dt, unit = "week", week_start = 1)
   fecha_fin_au    <- corte_dt
