@@ -1,9 +1,13 @@
 Package: DialogaR
-Title: What the Package Does (One Line, Title Case)
-Version: 0.1.2
+Title: ETL, Aggregation and Reporting for Diálogo Social
+Version: 0.2.0
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
+    person("Rafael", "Lopez", , "rlopez@morant.com.mx", role = c("aut", "cre"))
+Description: Data processing and reporting engine for Diálogo Social field
+    survey operations. Provides ETL pipelines for multi-zone SQL databases,
+    hierarchical aggregation (general, distrito, brigada, vocero), and
+    automated report generation in Excel, PowerPoint, and PDF formats.
+    Includes quality auditing tools and Google Drive publishing utilities.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
@@ -34,6 +38,7 @@ Imports:
     openxlsx,
     pool,
     purrr,
+    readr,
     rlang,
     scales,
     sf,
