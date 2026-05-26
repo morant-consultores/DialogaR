@@ -536,3 +536,104 @@ test_that("registros de bd_completa fuera del periodo no se cuelan en el reporte
   )
   expect_equal(sum(resultado$registros$Total, na.rm = TRUE), n_dentro)
 })
+
+# =========================================================================
+# TESTS: Coordinador–Vocero — sin pérdida de información ni duplicados
+# =========================================================================
+
+test_that("coordinador excluido de UsuariosEncuesta no pierde actividad en el reporte", {
+  # Verifica que cuando el ETL mantiene al coordinador ("002") en bd_aux con
+  # vocero poblado, su actividad llega íntegra al reporte.
+  corte     <- as.Date("2026-03-25")
+  fecha_ini <- as.Date("2026-03-23")
+  fechas    <- seq.Date(fecha_ini, corte, by = "day")
+
+  bd_completa <- make_bd_completa_multi(
+    fechas       = fechas,
+    usuario_nums = rep("002", length(fechas))
+  )
+
+  # Estado de bd_aux tras el fix: coordinador como vocero en su propia brigada
+  bd_aux <- tibble::tibble(
+    distrito           = "01",
+    municipio          = "Centro",
+    nombre_brigada     = "01 BRIGADA COORD",
+    nombre_coordinador = "CARLOS SOTO",
+    supervisor         = "002",
+    status_coord       = TRUE,
+    nombre_vocero      = "CARLOS SOTO",
+    vocero             = "002",
+    status_vocero      = TRUE
+  )
+
+  testthat::local_mocked_bindings(
+    tbl = function(src, ...) mock_usuarios_tibble(),
+    .package = "dplyr"
+  )
+
+  resultado <- suppressWarnings(generar_reporte_brigadas(
+    reporte     = "semanal",
+    corte       = corte,
+    id_proyecto = 10L,
+    pool        = NULL,
+    bd_completa = bd_completa,
+    bd_aux      = bd_aux,
+    insumos     = make_insumos_cat(coord_nums = "002"),
+    week_start  = 1L
+  ))
+
+  fila <- dplyr::filter(resultado$registros, vocero == "002")
+  expect_equal(nrow(fila), 1L)
+  expect_equal(fila$Total, length(fechas))
+  expect_equal(sum(resultado$registros$Total, na.rm = TRUE), length(fechas))
+})
+
+test_that("coordinador con brigada propia (dist 02) y brigada supervisada (dist 01) aparece exactamente una vez", {
+  # Regresión: antes del fix de distinct(supervisor), este coordinador aparecía
+  # dos veces — una por cada distrito — porque su fila auto-supervisada en bd_aux
+  # generaba un segundo registro en reg_sup con distinto distrito.
+  corte     <- as.Date("2026-03-25")
+  fecha_ini <- as.Date("2026-03-23")
+  fechas    <- seq.Date(fecha_ini, corte, by = "day")
+
+  bd_completa <- make_bd_completa_multi(
+    fechas       = fechas[1:2],
+    usuario_nums = rep("002", 2)
+  )
+
+  # bd_aux con dos brigadas para el mismo coordinador:
+  # - vocero "001" en B1 (dist=01), supervisado por "002"
+  # - coordinador "002" en B2 (dist=02), se auto-supervisa
+  bd_aux <- tibble::tibble(
+    distrito           = c("01", "02"),
+    municipio          = c("Centro", "Centro"),
+    nombre_brigada     = c("01 LAURA GARCIA", "02 MARTIN EDUARDO"),
+    nombre_coordinador = c("CARLOS SOTO", "CARLOS SOTO"),
+    supervisor         = c("002", "002"),
+    status_coord       = c(TRUE, TRUE),
+    nombre_vocero      = c("JUAN PEREZ", "CARLOS SOTO"),
+    vocero             = c("001", "002"),
+    status_vocero      = c(TRUE, TRUE)
+  )
+
+  testthat::local_mocked_bindings(
+    tbl = function(src, ...) mock_usuarios_tibble(),
+    .package = "dplyr"
+  )
+
+  resultado <- suppressWarnings(generar_reporte_brigadas(
+    reporte     = "semanal",
+    corte       = corte,
+    id_proyecto = 10L,
+    pool        = NULL,
+    bd_completa = bd_completa,
+    bd_aux      = bd_aux,
+    insumos     = make_insumos_cat(coord_nums = "002"),
+    week_start  = 1L
+  ))
+
+  coord_rows <- dplyr::filter(resultado$registros, vocero == "002")
+  expect_equal(nrow(coord_rows), 1L)
+  expect_equal(coord_rows$Total, 2L)
+  expect_equal(sum(resultado$registros$Total, na.rm = TRUE), 2L)
+})

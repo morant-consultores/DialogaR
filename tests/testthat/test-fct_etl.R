@@ -675,3 +675,171 @@ test_that("procesar_pase_lista skips records with invalid JSON", {
     expect_equal(as.character(result$obtener_usuario[[1]]), "CARLOS DIAZ")
   }
 })
+
+# =========================================================================
+# TESTS: Coordinador-Vocero — sin pérdida de información ni duplicados
+# =========================================================================
+#
+# Escenario raíz: un coordinador (id=2, num="002") aparece en UsuariosEncuesta
+# con EncuestaId=288, pero el snapshot activo es 287. Por eso no queda en
+# usuarios_asignados. Sin el fix de ETL su actividad desaparecería del reporte.
+# Con el fix, debe aparecer en usuarios_cat (vía Cargo) y en bd_aux con
+# vocero poblado, sin filas duplicadas aunque se auto-supervise en UsuarioLog.
+# =========================================================================
+
+setup_coord_removido_db <- function() {
+  con <- DBI::dbConnect(RSQLite::SQLite(), ":memory:")
+
+  DBI::dbWriteTable(con, "Usuarios", data.frame(
+    Id           = c(1L, 2L),
+    IdProyecto   = c(10L, 10L),
+    Num          = c("001", "002"),
+    Cargo        = c("Vocero", "Coordinador de Brigada"),
+    Status       = c(TRUE, TRUE),
+    Municipio    = c("Centro", "Centro"),
+    Nombre       = c("Juan", "Carlos"),
+    APaterno     = c("Perez", "Soto"),
+    AMaterno     = c("Lopez", "Diaz"),
+    IdBrigada    = c(100L, 100L),
+    Capacitacion = c(TRUE, FALSE),
+    FechaUpdate  = c("2026-01-01", "2026-01-01"),
+    stringsAsFactors = FALSE
+  ))
+
+  # Vocero (id=1) → EncuestaId 287 (matches snapshot activo).
+  # Coordinador (id=2) → EncuestaId 288 (distinto): queda fuera de usuarios_asignados.
+  DBI::dbWriteTable(con, "UsuariosEncuesta", data.frame(
+    Id         = c(1L, 2L),
+    EncuestaId = c(287L, 288L),
+    UsuarioId  = c(1L, 2L),
+    Activo     = c(1L, 1L),
+    stringsAsFactors = FALSE
+  ))
+
+  DBI::dbWriteTable(con, "Brigadas", data.frame(
+    Id              = 100L,
+    NombreBrigada   = "01 BRIGADA NORTE",
+    Activo          = TRUE,
+    IdZonaDeTrabajo = 1L,
+    IdUsuario       = 2L,
+    IdProyecto      = 10L,
+    stringsAsFactors = FALSE
+  ))
+
+  DBI::dbWriteTable(con, "Municipios", data.frame(
+    Id        = 1L,
+    Municipio = "Centro",
+    stringsAsFactors = FALSE
+  ))
+
+  # Coordinador (id=2) se auto-supervisa (IdSupervisor = 2).
+  DBI::dbWriteTable(con, "UsuarioLog", data.frame(
+    IdHistorico    = c(1L, 2L),
+    IdUsuario      = c(1L, 2L),
+    IdCargo        = c(1L, 2L),
+    IdEstado       = c(1L, 1L),
+    IdMunicipio    = c(1L, 1L),
+    IdZonaDeTabajo = c(1L, 1L),
+    IdSupervisor   = c(2L, 2L),
+    IdBrigada      = c(100L, 100L),
+    FechaInsert    = c("2026-01-15 00:00:00", "2026-01-15 00:00:00"),
+    IdProyecto     = c(10L, 10L),
+    stringsAsFactors = FALSE
+  ))
+
+  # Ambos usuarios tienen actividad en el snapshot activo (287).
+  DBI::dbWriteTable(con, "snapshot_id_287", data.frame(
+    fecha            = c("2026-03-20", "2026-03-20"),
+    usuario_num      = c("001", "002"),
+    seccion          = c("0001", "0002"),
+    desglose         = c("Efectivo", "Efectivo"),
+    duracion_minutos = c(10L, 15L),
+    stringsAsFactors = FALSE
+  ))
+
+  con
+}
+
+fuentes_snapshot_287 <- list(list(
+  tabla       = "snapshot_id_287",
+  select_cols = c("fecha", "usuario_num", "seccion", "desglose", "duracion_minutos"),
+  origen      = "snapshot_id_287"
+))
+
+test_that("cargar_usuarios_cat: coordinador fuera de usuarios_asignados sigue en el catálogo", {
+  con <- DBI::dbConnect(RSQLite::SQLite(), ":memory:")
+  on.exit(DBI::dbDisconnect(con))
+
+  DBI::dbWriteTable(con, "Usuarios", data.frame(
+    Id = c(1L, 2L), IdProyecto = c(10L, 10L),
+    Num = c("001", "002"),
+    Cargo = c("Vocero", "Coordinador de Brigada"),
+    Status = c(TRUE, TRUE),
+    Municipio = c("Centro", "Centro"),
+    Nombre = c("Juan", "Carlos"), APaterno = c("Perez", "Soto"), AMaterno = c("Lopez", "Diaz"),
+    IdBrigada = c(100L, 100L), Capacitacion = c(TRUE, FALSE),
+    FechaUpdate = c("2026-01-01", "2026-01-01"),
+    stringsAsFactors = FALSE
+  ))
+
+  result <- cargar_usuarios_cat(
+    con, 10L,
+    usuarios_asignados  = 1L,
+    cargo_coordinador   = "Coordinador de Brigada"
+  )
+
+  expect_true(1L %in% result$id_usuario, label = "vocero presente")
+  expect_true(2L %in% result$id_usuario, label = "coordinador presente aunque no esté en usuarios_asignados")
+  expect_equal(result$cargo[result$id_usuario == 2L], "Coordinador de Brigada")
+})
+
+test_that("cargar_insumos: coordinador con EncuestaId distinto al snapshot está en insumos$cat$usuarios", {
+  con <- setup_coord_removido_db()
+  on.exit(DBI::dbDisconnect(con))
+
+  resultado <- cargar_insumos(
+    pool              = con,
+    id_proyecto       = 10L,
+    corte             = as.Date("2026-03-31"),
+    fuentes_actividad = fuentes_snapshot_287
+  )
+
+  expect_true("002" %in% resultado$cat$usuarios$num)
+  expect_equal(
+    resultado$cat$usuarios$cargo[resultado$cat$usuarios$num == "002"],
+    "Coordinador de Brigada"
+  )
+})
+
+test_that("cargar_insumos: bd_aux tiene vocero poblado para coordinador excluido de UsuariosEncuesta", {
+  con <- setup_coord_removido_db()
+  on.exit(DBI::dbDisconnect(con))
+
+  resultado <- cargar_insumos(
+    pool              = con,
+    id_proyecto       = 10L,
+    corte             = as.Date("2026-03-31"),
+    fuentes_actividad = fuentes_snapshot_287
+  )
+
+  coord_row <- dplyr::filter(resultado$bd_aux, vocero == "002")
+  expect_equal(nrow(coord_row), 1L)
+  expect_false(is.na(coord_row$nombre_vocero))
+})
+
+test_that("cargar_insumos: bd_aux sin filas duplicadas cuando coordinador se auto-supervisa", {
+  con <- setup_coord_removido_db()
+  on.exit(DBI::dbDisconnect(con))
+
+  resultado <- cargar_insumos(
+    pool              = con,
+    id_proyecto       = 10L,
+    corte             = as.Date("2026-03-31"),
+    fuentes_actividad = fuentes_snapshot_287
+  )
+
+  # 2 usuarios en UsuarioLog → exactamente 2 filas, sin duplicados por auto-supervisión
+  expect_equal(nrow(resultado$bd_aux), 2L)
+  voceros_presentes <- resultado$bd_aux$vocero[!is.na(resultado$bd_aux$vocero)]
+  expect_equal(length(voceros_presentes), dplyr::n_distinct(voceros_presentes))
+})
