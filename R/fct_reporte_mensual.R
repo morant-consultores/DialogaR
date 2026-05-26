@@ -153,7 +153,7 @@ generar_reporte_brigadas <- function(
         status_vocero = status_coord
       ) |>
       dplyr::arrange(dplyr::desc(nombre_brigada)) |>
-      dplyr::distinct(distrito, nombre_coordinador, .keep_all = TRUE) |>
+      dplyr::distinct(supervisor, .keep_all = TRUE) |>
       dplyr::filter(vocero %in% coord_nums) |>
       dplyr::left_join(df_stats, by = dplyr::join_by(supervisor == usuario_num))
 

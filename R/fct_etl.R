@@ -32,7 +32,7 @@ cargar_usuarios_cat <- function(pool, id_proyecto, usuarios_asignados = NULL, ca
       Capacitacion == TRUE | Cargo == !!cargo_coordinador
     )
   if (!is.null(usuarios_asignados) && length(usuarios_asignados) > 0) {
-    q <- q |> dplyr::filter(Id %in% !!usuarios_asignados)
+    q <- q |> dplyr::filter(Id %in% !!usuarios_asignados | Cargo == !!cargo_coordinador)
   }
   q |>
     dplyr::select(
