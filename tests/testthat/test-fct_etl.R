@@ -53,6 +53,19 @@ setup_etl_db <- function() {
     stringsAsFactors = FALSE
   ))
 
+  DBI::dbWriteTable(con, "BrigadasLog", data.frame(
+    IdHistorico     = c(1L, 2L),
+    BrigadaId       = c(100L, 100L),
+    NombreBrigada   = c("06_BRIGADA NORTE", "06_BRIGADA NORTE"),
+    IdUsuario       = c(NA_integer_, 2L),
+    IdZonaDeTrabajo = c(1L, 1L),
+    IdGrupo         = c(1L, 1L),
+    Activo          = c(TRUE, TRUE),
+    FechaInsert     = c("2026-01-01 00:00:00", "2026-01-15 00:00:00"),
+    IdProyecto      = c(10L, 10L),
+    stringsAsFactors = FALSE
+  ))
+
   DBI::dbWriteTable(con, "Actividad", data.frame(
     fecha = "2026-03-20",
     usuario_num = "001",
@@ -157,6 +170,18 @@ test_that("cargar_insumos respeta cargo_coordinador personalizado", {
     FechaInsert = "2026-01-15 00:00:00", IdProyecto = 10L,
     stringsAsFactors = FALSE
   ))
+  DBI::dbWriteTable(con, "BrigadasLog", data.frame(
+    IdHistorico     = c(1L, 2L),
+    BrigadaId       = c(100L, 100L),
+    NombreBrigada   = c("BRIGADA NORTE", "BRIGADA NORTE"),
+    IdUsuario       = c(NA_integer_, 2L),
+    IdZonaDeTrabajo = c(1L, 1L),
+    IdGrupo         = c(1L, 1L),
+    Activo          = c(TRUE, TRUE),
+    FechaInsert     = c("2026-01-01 00:00:00", "2026-01-15 00:00:00"),
+    IdProyecto      = c(10L, 10L),
+    stringsAsFactors = FALSE
+  ))
   DBI::dbWriteTable(con, "Actividad", data.frame(
     fecha = "2026-03-20", usuario_num = "001", seccion = "0001",
     desglose = "Efectivo", duracion_minutos = 10, origen = "Actividad",
@@ -169,11 +194,12 @@ test_that("cargar_insumos respeta cargo_coordinador personalizado", {
     origen = "Actividad"
   ))
 
-  # Sin cargo_coordinador correcto → coordinadores vacío
-  res_default <- cargar_insumos(
+  # Sin cargo_coordinador correcto → coordinadores vacío; Brigadas.IdUsuario apunta
+  # a un cargo distinto → advertencia esperada de coordinador no resuelto.
+  res_default <- suppressWarnings(cargar_insumos(
     pool = con, id_proyecto = 10L, corte = as.Date("2026-03-31"),
     fuentes_actividad = fuentes
-  )
+  ))
   expect_equal(nrow(res_default$bd_aux |> dplyr::filter(!is.na(supervisor))), 0L)
 
   # Con cargo_coordinador = "Supervisor" → coordinador reconocido
@@ -559,11 +585,12 @@ ucat_bd <- dplyr::tibble(
 )
 
 bcat_bd <- dplyr::tibble(
-  id_brigada            = c(100L, 200L),
-  nombre_brigada        = c("BRIGADA NORTE", "BRIGADA SUR"),
-  activo_brigada        = c(TRUE, TRUE),
-  id_zona_trabajo_brigada = c(1L, 1L),
-  id_usuario_brigada    = c(2L, NA_integer_)
+  id_brigada         = c(100L, 200L),
+  nombre_brigada_log = c("BRIGADA NORTE", "BRIGADA SUR"),
+  id_coordinador_log = c(2L, NA_integer_),
+  id_zona_trabajo    = c(1L, 1L),
+  id_grupo           = c(1L, 1L),
+  activo_brigada     = c(TRUE, TRUE)
 )
 
 ccat_bd <- dplyr::tibble(
@@ -615,11 +642,12 @@ test_that("construir_bd_aux: distrito NA cuando nombres de brigada no siguen pat
 
 test_that("construir_bd_aux: distrito extraido cuando todos los nombres de brigada empiezan con DD", {
   bcat_con_distrito <- dplyr::tibble(
-    id_brigada              = c(100L, 200L),
-    nombre_brigada          = c("01 BRIGADA NORTE", "02 BRIGADA SUR"),
-    activo_brigada          = c(TRUE, TRUE),
-    id_zona_trabajo_brigada = c(1L, 1L),
-    id_usuario_brigada      = c(2L, NA_integer_)
+    id_brigada         = c(100L, 200L),
+    nombre_brigada_log = c("01 BRIGADA NORTE", "02 BRIGADA SUR"),
+    id_coordinador_log = c(2L, NA_integer_),
+    id_zona_trabajo    = c(1L, 1L),
+    id_grupo           = c(1L, 1L),
+    activo_brigada     = c(TRUE, TRUE)
   )
   ec <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 100L)
   result <- construir_bd_aux(ec, ucat_bd, ccat_bd, bcat_con_distrito, mcat_bd)
@@ -629,11 +657,12 @@ test_that("construir_bd_aux: distrito extraido cuando todos los nombres de briga
 
 test_that("construir_bd_aux: distrito parcial cuando solo algunas brigadas siguen el patron DD", {
   bcat_mixto <- dplyr::tibble(
-    id_brigada              = c(100L, 200L),
-    nombre_brigada          = c("01 BRIGADA NORTE", "BRIGADA SUR"),  # mixto
-    activo_brigada          = c(TRUE, TRUE),
-    id_zona_trabajo_brigada = c(1L, 1L),
-    id_usuario_brigada      = c(2L, NA_integer_)
+    id_brigada         = c(100L, 200L),
+    nombre_brigada_log = c("01 BRIGADA NORTE", "BRIGADA SUR"),  # mixto
+    id_coordinador_log = c(2L, NA_integer_),
+    id_zona_trabajo    = c(1L, 1L),
+    id_grupo           = c(1L, 1L),
+    activo_brigada     = c(TRUE, TRUE)
   )
   # Al menos una brigada tiene prefijo DD → usar_distrito TRUE.
   # "01 BRIGADA NORTE" → distrito "01"; "BRIGADA SUR" → NA.
@@ -747,6 +776,19 @@ setup_coord_removido_db <- function() {
     stringsAsFactors = FALSE
   ))
 
+  DBI::dbWriteTable(con, "BrigadasLog", data.frame(
+    IdHistorico     = c(1L, 2L),
+    BrigadaId       = c(100L, 100L),
+    NombreBrigada   = c("01 BRIGADA NORTE", "01 BRIGADA NORTE"),
+    IdUsuario       = c(NA_integer_, 2L),
+    IdZonaDeTrabajo = c(1L, 1L),
+    IdGrupo         = c(1L, 1L),
+    Activo          = c(TRUE, TRUE),
+    FechaInsert     = c("2026-01-01 00:00:00", "2026-01-15 00:00:00"),
+    IdProyecto      = c(10L, 10L),
+    stringsAsFactors = FALSE
+  ))
+
   # Ambos usuarios tienen actividad en el snapshot activo (287).
   DBI::dbWriteTable(con, "snapshot_id_287", data.frame(
     fecha            = c("2026-03-20", "2026-03-20"),
@@ -842,4 +884,128 @@ test_that("cargar_insumos: bd_aux sin filas duplicadas cuando coordinador se aut
   expect_equal(nrow(resultado$bd_aux), 2L)
   voceros_presentes <- resultado$bd_aux$vocero[!is.na(resultado$bd_aux$vocero)]
   expect_equal(length(voceros_presentes), dplyr::n_distinct(voceros_presentes))
+})
+
+# =========================================================================
+# TESTS: resolver_coordinador_en_fecha
+# =========================================================================
+
+make_brigada_log <- function() {
+  dplyr::tibble(
+    IdHistorico     = c(1L, 2L, 3L),
+    BrigadaId       = c(100L, 100L, 200L),
+    NombreBrigada   = c("BRIGADA NORTE", "BRIGADA NORTE", "BRIGADA SUR"),
+    IdUsuario       = c(NA_integer_, 2L, 5L),
+    IdZonaDeTrabajo = c(1L, 1L, 2L),
+    IdGrupo         = c(1L, 1L, 2L),
+    Activo          = c(TRUE, TRUE, TRUE),
+    FechaInsert     = as.POSIXct(c(
+      "2026-01-01 00:00:00",
+      "2026-01-15 00:00:00",
+      "2026-01-01 00:00:00"
+    ), tz = "UTC"),
+    ts_evento       = as.POSIXct(c(
+      "2026-01-01 00:00:00",
+      "2026-01-15 00:00:00",
+      "2026-01-01 00:00:00"
+    ), tz = "America/Mexico_City"),
+    fecha_evento    = as.Date(c("2026-01-01", "2026-01-15", "2026-01-01"))
+  )
+}
+
+test_that("resolver_coordinador_en_fecha: LOCF resuelve coordinador correcto al corte", {
+  result <- resolver_coordinador_en_fecha(make_brigada_log(), corte = as.Date("2026-03-31"))
+
+  expect_equal(nrow(result), 2L)
+  brigada_100 <- result[result$id_brigada == 100L, ]
+  expect_equal(brigada_100$id_coordinador_log, 2L)
+  expect_equal(brigada_100$nombre_brigada_log, "BRIGADA NORTE")
+})
+
+test_that("resolver_coordinador_en_fecha: primera entrada NULL se resuelve correctamente via LOCF", {
+  # IdHistorico 1 es NULL, IdHistorico 2 tiene coordinador — LOCF propaga hacia adelante
+  # pero el orden es por IdHistorico, así que slice_tail devuelve la última fila (con valor)
+  log_con_null_inicial <- dplyr::tibble(
+    IdHistorico     = c(1L, 2L),
+    BrigadaId       = c(100L, 100L),
+    NombreBrigada   = c("BRIGADA NORTE", "BRIGADA NORTE"),
+    IdUsuario       = c(NA_integer_, 2L),
+    IdZonaDeTrabajo = c(1L, 1L),
+    IdGrupo         = c(1L, 1L),
+    Activo          = c(TRUE, TRUE),
+    FechaInsert     = as.POSIXct(c("2026-01-01", "2026-01-15"), tz = "UTC"),
+    ts_evento       = as.POSIXct(c("2026-01-01", "2026-01-15"), tz = "America/Mexico_City"),
+    fecha_evento    = as.Date(c("2026-01-01", "2026-01-15"))
+  )
+
+  result <- resolver_coordinador_en_fecha(log_con_null_inicial, corte = as.Date("2026-03-31"))
+
+  expect_equal(nrow(result), 1L)
+  expect_equal(result$id_coordinador_log, 2L)
+})
+
+test_that("resolver_coordinador_en_fecha: brigada con todos IdUsuario NULL retorna NA sin error", {
+  log_null <- dplyr::tibble(
+    IdHistorico     = c(1L, 2L),
+    BrigadaId       = c(100L, 100L),
+    NombreBrigada   = c("BRIGADA NORTE", "BRIGADA NORTE"),
+    IdUsuario       = c(NA_integer_, NA_integer_),
+    IdZonaDeTrabajo = c(1L, 1L),
+    IdGrupo         = c(1L, 1L),
+    Activo          = c(TRUE, TRUE),
+    FechaInsert     = as.POSIXct(c("2026-01-01", "2026-01-15"), tz = "UTC"),
+    ts_evento       = as.POSIXct(c("2026-01-01", "2026-01-15"), tz = "America/Mexico_City"),
+    fecha_evento    = as.Date(c("2026-01-01", "2026-01-15"))
+  )
+
+  result <- resolver_coordinador_en_fecha(log_null, corte = as.Date("2026-03-31"))
+
+  expect_equal(nrow(result), 1L)
+  expect_true(is.na(result$id_coordinador_log))
+})
+
+test_that("resolver_coordinador_en_fecha: todos los eventos después del corte retorna 0 filas", {
+  result <- resolver_coordinador_en_fecha(make_brigada_log(), corte = as.Date("2025-12-31"))
+
+  expect_equal(nrow(result), 0L)
+})
+
+test_that("resolver_coordinador_en_fecha: incluye columnas id_zona_trabajo e id_grupo", {
+  result <- resolver_coordinador_en_fecha(make_brigada_log(), corte = as.Date("2026-03-31"))
+
+  expect_true("id_zona_trabajo" %in% names(result))
+  expect_true("id_grupo" %in% names(result))
+  brigada_200 <- result[result$id_brigada == 200L, ]
+  expect_equal(brigada_200$id_zona_trabajo, 2L)
+  expect_equal(brigada_200$id_grupo, 2L)
+})
+
+# =========================================================================
+# TESTS: resolver_brigada_en_fecha — ruta directa via id_usuario_actividad
+# =========================================================================
+
+test_that("resolver_brigada_en_fecha: usa ruta directa cuando id_usuario_actividad está presente", {
+  actividad <- dplyr::tibble(
+    usuario_num          = NA_character_,
+    fecha                = as.Date("2026-02-01"),
+    id_usuario_actividad = 1L
+  )
+
+  result <- resolver_brigada_en_fecha(actividad, make_usuario_log(), make_usuarios_cat())
+
+  expect_equal(nrow(result), 1L)
+  expect_equal(result$id_brigada, 100L)
+})
+
+test_that("resolver_brigada_en_fecha: ruta directa devuelve NA cuando usuario sin brigada en log", {
+  actividad <- dplyr::tibble(
+    usuario_num          = NA_character_,
+    fecha                = as.Date("2025-12-31"),  # antes de cualquier log
+    id_usuario_actividad = 1L
+  )
+
+  result <- resolver_brigada_en_fecha(actividad, make_usuario_log(), make_usuarios_cat())
+
+  expect_equal(nrow(result), 1L)
+  expect_true(is.na(result$id_brigada))
 })
