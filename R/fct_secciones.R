@@ -1,8 +1,9 @@
-#' Calcular meta por sección y usuario con agrupación condicional
+#' Calcular meta por sección con brigadas y fechas colapsadas
 #'
-#' Agrega la actividad de campo por sección geográfica y la cruza con las metas
-#' asignadas. Si se proporciona \code{base_coordinadores}, la agrupación incluye
-#' también el coordinador y la brigada responsable de cada sección.
+#' Agrega la actividad de campo por sección geográfica (una fila por sección)
+#' y la cruza con las metas asignadas. Las fechas de visita se colapsan en una
+#' sola celda con \code{toString}. Si se proporciona \code{base_coordinadores},
+#' las brigadas que visitaron cada sección también se colapsan en una celda.
 #'
 #' @param bd_actividad Data frame con el registro de actividad de campo. Debe
 #'   contener al menos las columnas \code{seccion}, \code{fecha},
@@ -14,13 +15,17 @@
 #'   interpretable por R como fecha).
 #' @param base_coordinadores Data frame opcional con la asignación de voceros a
 #'   coordinadores y brigadas. Debe contener las columnas \code{vocero},
-#'   \code{nombre_coordinador} y \code{nombre_brigada}. Si es \code{NULL}
-#'   (predeterminado) la agrupación se realiza solo por sección.
+#'   \code{nombre_coordinador} y \code{nombre_brigada}. Si se provee, se añade
+#'   la columna \code{BRIGADAS} con los nombres colapsados. Si es \code{NULL}
+#'   (predeterminado) esa columna no aparece.
 #'
-#' @return Data frame con una fila por combinación de agrupación, columnas en
-#'   mayúsculas con espacios, que incluye viviendas visitadas, días trabajados,
-#'   diálogos efectivos, meta, fecha de corte y avance de meta (proporción
-#'   numérica; \code{0} cuando la sección no tiene meta asignada o la meta es cero).
+#' @return Data frame con \strong{una fila por sección}, columnas en mayúsculas
+#'   con espacios, que incluye viviendas visitadas, días trabajados, diálogos
+#'   efectivos, fechas de visita (colapsadas con \code{toString}), meta, fecha
+#'   de corte y avance de meta (proporción numérica; \code{0} cuando la sección
+#'   no tiene meta asignada o la meta es cero). Cuando se provee
+#'   \code{base_coordinadores} se añade la columna \code{BRIGADAS} con los
+#'   nombres de brigada colapsados.
 #'
 #' @export
 #'
@@ -57,22 +62,31 @@ meta_usuario_condicional <- function(
   if (!is.null(base_coordinadores)) {
     bd <- bd |>
       dplyr::left_join(base_coordinadores, by = c("usuario_num" = "vocero"))
-
-    group_vars <- c("seccion", "nombre_coordinador", "nombre_brigada")
-  } else {
-    group_vars <- c("seccion")
   }
 
   # -----------------------------
-  # Agregación principal
+  # Agregación principal — siempre una fila por sección
   # -----------------------------
   out <- bd |>
     dplyr::summarise(
-      viviendas_visitadas = dplyr::n(),
-      dias_trabajados = dplyr::n_distinct(fecha),
-      diálogos_efectivos = sum(desglose == "Efectivo", na.rm = TRUE),
-      .by = dplyr::all_of(group_vars)
-    ) |>
+      viviendas_visitadas  = dplyr::n(),
+      dias_trabajados      = dplyr::n_distinct(fecha),
+      diálogos_efectivos   = sum(desglose == "Efectivo", na.rm = TRUE),
+      fechas_visita        = toString(sort(unique(fecha))),
+      .by = "seccion"
+    )
+
+  # Brigadas colapsadas (solo cuando se proveyó base_coordinadores)
+  if (!is.null(base_coordinadores)) {
+    brigadas_resumen <- bd |>
+      dplyr::summarise(
+        brigadas = toString(sort(unique(na.omit(nombre_brigada)))),
+        .by = "seccion"
+      )
+    out <- dplyr::left_join(out, brigadas_resumen, by = "seccion")
+  }
+
+  out <- out |>
     dplyr::left_join(
       metas |>
         dplyr::transmute(
