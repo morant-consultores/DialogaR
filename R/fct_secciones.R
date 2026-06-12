@@ -14,9 +14,10 @@
 #' @param corte Fecha de corte del reporte (objeto \code{Date} o cadena
 #'   interpretable por R como fecha).
 #' @param base_coordinadores Data frame opcional con la asignación de voceros a
-#'   coordinadores y brigadas. Debe contener las columnas \code{vocero},
-#'   \code{nombre_coordinador} y \code{nombre_brigada}. Si se provee, se añade
-#'   la columna \code{BRIGADAS} con los nombres colapsados. Si es \code{NULL}
+#'   coordinadores y brigadas. Debe contener las columnas \code{vocero} y
+#'   \code{nombre_brigada}. La columna \code{nombre_coordinador}, si está
+#'   presente, es ignorada en esta versión. Si se provee, se añade la columna
+#'   \code{BRIGADAS} con los nombres colapsados. Si es \code{NULL}
 #'   (predeterminado) esa columna no aparece.
 #'
 #' @return Data frame con \strong{una fila por sección}, columnas en mayúsculas
@@ -67,23 +68,25 @@ meta_usuario_condicional <- function(
   # -----------------------------
   # Agregación principal — siempre una fila por sección
   # -----------------------------
-  out <- bd |>
-    dplyr::summarise(
-      viviendas_visitadas  = dplyr::n(),
-      dias_trabajados      = dplyr::n_distinct(fecha),
-      diálogos_efectivos   = sum(desglose == "Efectivo", na.rm = TRUE),
-      fechas_visita        = toString(sort(unique(fecha))),
-      .by = "seccion"
-    )
-
-  # Brigadas colapsadas (solo cuando se proveyó base_coordinadores)
   if (!is.null(base_coordinadores)) {
-    brigadas_resumen <- bd |>
+    out <- bd |>
       dplyr::summarise(
-        brigadas = toString(sort(unique(na.omit(nombre_brigada)))),
+        viviendas_visitadas  = dplyr::n(),
+        dias_trabajados      = dplyr::n_distinct(fecha),
+        diálogos_efectivos   = sum(desglose == "Efectivo", na.rm = TRUE),
+        fechas_visita        = toString(sort(unique(fecha))),
+        brigadas             = toString(sort(unique(na.omit(nombre_brigada)))),
         .by = "seccion"
       )
-    out <- dplyr::left_join(out, brigadas_resumen, by = "seccion")
+  } else {
+    out <- bd |>
+      dplyr::summarise(
+        viviendas_visitadas  = dplyr::n(),
+        dias_trabajados      = dplyr::n_distinct(fecha),
+        diálogos_efectivos   = sum(desglose == "Efectivo", na.rm = TRUE),
+        fechas_visita        = toString(sort(unique(fecha))),
+        .by = "seccion"
+      )
   }
 
   out <- out |>
