@@ -7,7 +7,8 @@ cargar_actividad <- function(
   normalizador = NULL
 ) {
   purrr::map_dfr(fuentes, function(f) {
-    q <- tbl(pool, f$tabla)
+    tabla_ref <- if (!is.null(f$schema)) DBI::Id(schema = f$schema, table = f$tabla) else f$tabla
+    q <- tbl(pool, tabla_ref)
 
     # 1) Filtro mínimo por fuente (SQL)
     if (!is.null(filtro_minimo)) {
