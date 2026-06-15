@@ -186,12 +186,15 @@ cargar_actividad <- function(
       q <- q |> dplyr::select(dplyr::any_of(f$select_cols))
     }
 
-    df <- q |>
-      dplyr::collect() |>
+    df <- q |> dplyr::collect()
+    has_num <- "usuario_num" %in% names(df)
+    uid_col <- intersect(c("usuario_id", "UsuarioId"), names(df))[1]
+    has_uid <- !is.na(uid_col)
+    df <- df |>
       dplyr::mutate(
         fecha        = as.Date(fecha),
-        usuario_num  = if ("usuario_num" %in% names(.)) as.character(usuario_num) else NA_character_,
-        id_usuario_actividad = if ("UsuarioId" %in% names(.)) as.integer(UsuarioId) else NA_integer_,
+        usuario_num  = if (has_num) as.character(usuario_num) else NA_character_,
+        id_usuario_actividad = if (has_uid) as.integer(.data[[uid_col]]) else NA_integer_,
         origen_datos = dplyr::coalesce(f$origen, f$tabla)
       )
 
@@ -412,8 +415,10 @@ resolver_brigada_en_fecha <- function(actividad, usuario_log, usuarios_cat, num_
     dplyr::distinct(id_usuario, fecha_evento, .keep_all = TRUE)
 
   # Ruta directa: actividad tiene id_usuario_actividad (FK int a Usuarios.Id)
+  # Requiere ALL no-NA para garantizar que no haya rows sin resolver (hasta que
+  # el snapshot tenga UsuarioId completo con backpropagación)
   tiene_id_usuario <- "id_usuario_actividad" %in% names(actividad) &&
-    any(!is.na(actividad$id_usuario_actividad))
+    all(!is.na(actividad$id_usuario_actividad))
 
   if (tiene_id_usuario) {
     return(
