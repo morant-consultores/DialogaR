@@ -171,14 +171,19 @@ cargar_actividad <- function(
     if (!is.null(filtro_minimo)) {
       q <- filtro_minimo(q, f)
     }
+
+    # Fechas por-fuente tienen prioridad sobre el global
+    f_fecha_min <- f$fecha_min %||% fecha_min
+    f_fecha_max <- f$fecha_max %||% fecha_max
+    if (!is.null(f_fecha_min)) {
+      q <- q |> dplyr::filter(fecha >= !!as.Date(f_fecha_min))
+    }
+    if (!is.null(f_fecha_max)) {
+      q <- q |> dplyr::filter(fecha <= !!as.Date(f_fecha_max))
+    }
+
     if (!is.null(f$select_cols)) {
       q <- q |> dplyr::select(dplyr::any_of(f$select_cols))
-    }
-    if (!is.null(fecha_min)) {
-      q <- q |> dplyr::filter(fecha >= !!as.Date(fecha_min))
-    }
-    if (!is.null(fecha_max)) {
-      q <- q |> dplyr::filter(fecha <= !!as.Date(fecha_max))
     }
 
     df <- q |>
@@ -186,12 +191,14 @@ cargar_actividad <- function(
       dplyr::mutate(
         fecha        = as.Date(fecha),
         usuario_num  = if ("usuario_num" %in% names(.)) as.character(usuario_num) else NA_character_,
-        # UsuarioId (int FK → Usuarios.Id) disponible en snapshots nuevos.
-        # Cuando está presente habilita la ruta directa en resolver_brigada_en_fecha.
         id_usuario_actividad = if ("UsuarioId" %in% names(.)) as.integer(UsuarioId) else NA_integer_,
-        seccion      = sprintf("%04s", seccion),
         origen_datos = dplyr::coalesce(f$origen, f$tabla)
       )
+
+    # seccion: solo si existe (proyectos con AGEB no la tienen)
+    if ("seccion" %in% names(df)) {
+      df <- df |> dplyr::mutate(seccion = sprintf("%04s", seccion))
+    }
 
     if (!is.null(normalizador)) {
       df <- normalizador(df, f)
