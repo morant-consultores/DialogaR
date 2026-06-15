@@ -147,7 +147,12 @@ cargar_actividad <- function(
   normalizador = NULL
 ) {
   purrr::map_dfr(fuentes, function(f) {
-    q <- dplyr::tbl(pool, f$tabla)
+    tabla_ref <- if (!is.null(f$schema)) {
+      dbplyr::in_schema(f$schema, f$tabla)
+    } else {
+      f$tabla
+    }
+    q <- dplyr::tbl(pool, tabla_ref)
 
     if (!is.null(filtro_minimo)) {
       q <- filtro_minimo(q, f)
