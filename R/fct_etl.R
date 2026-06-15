@@ -162,7 +162,7 @@ cargar_actividad <- function(
 ) {
   purrr::map_dfr(fuentes, function(f) {
     tabla_ref <- if (!is.null(f$schema)) {
-      dbplyr::in_schema(f$schema, f$tabla)
+      DBI::Id(schema = f$schema, table = f$tabla)
     } else {
       f$tabla
     }
