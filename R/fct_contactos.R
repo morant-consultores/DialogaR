@@ -48,8 +48,19 @@ construir_base_contactos <- function(
   corte,
   bd_aux,
   na_chr = "-",
-  clasificacion = FALSE
+  clasificacion = FALSE,
+  voceros = NULL,
+  brigadas = NULL,
+  coordinadores = NULL,
+  aux_zonas = NULL
 ) {
+  if (!is.null(voceros) || !is.null(brigadas) || !is.null(coordinadores) || !is.null(aux_zonas)) {
+    cli::cli_abort(c(
+      "x" = "Los parámetros {.arg voceros}, {.arg brigadas}, {.arg coordinadores} y {.arg aux_zonas} fueron eliminados en v0.3.0.",
+      "i" = "Usa {.arg bd_aux} (salida de {.fn cargar_insumos}$bd_aux) en su lugar."
+    ))
+  }
+
   # ------------------------------------------------------------
   # Helpers
   # ------------------------------------------------------------
