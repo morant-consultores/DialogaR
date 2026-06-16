@@ -15,73 +15,89 @@
 # ---- Helpers Internos (No exportados) -----------------------------------
 
 # 1. Construir la base operativa (Extrae y cruza la jerarquía)
+#
+# v0.3.0: reemplaza la ruta UsuarioLog→IdSupervisor (que produce NA cuando
+# la plataforma deja de registrar ese campo) por la cadena:
+#   UsuarioLog (LOCF IdBrigada) → BrigadasLog (LOCF IdUsuario) → Usuarios
 construir_base_operativa_pl <- function(
   pool,
   id_proyecto,
   ids_encuestas_dialogo,
-  id_cargo_supervisor
+  id_cargo_supervisor,
+  corte = Sys.Date()
 ) {
   usuarios <- dplyr::tbl(pool, "Usuarios") |>
     dplyr::filter(IdProyecto == !!id_proyecto) |>
     dplyr::collect()
   usuarios_encuesta <- dplyr::tbl(pool, "UsuariosEncuesta") |> dplyr::collect()
-  brigadas <- dplyr::tbl(pool, "Brigadas") |>
-    dplyr::filter(IdProyecto == !!id_proyecto) |>
-    dplyr::collect()
   usuario_log <- dplyr::tbl(pool, "UsuarioLog") |>
     dplyr::filter(IdProyecto == !!id_proyecto) |>
     dplyr::collect()
+  brigada_log <- cargar_brigada_log(pool, id_proyecto)
 
-  base_aux <- usuario_log |>
-    dplyr::arrange(dplyr::desc(FechaInsert)) |>
-    dplyr::distinct(IdUsuario, .keep_all = TRUE) |>
-    dplyr::select(IdSupervisor, IdUsuario, IdBrigada) |>
-    dplyr::filter(!is.na(IdSupervisor)) |>
-    dplyr::left_join(
-      brigadas |> dplyr::select(Id, NombreBrigada),
-      by = dplyr::join_by(IdBrigada == Id)
-    ) |>
-    dplyr::inner_join(
-      usuarios |>
-        dplyr::transmute(
-          Id,
-          nombre_coordinador = paste(Nombre, APaterno, AMaterno),
-          supervisor = Num,
-          status_supervisor = Status,
-          IdCargoSupervisor = IdCargo
-        ),
-      by = dplyr::join_by(IdSupervisor == Id)
-    ) |>
+  # Brigada vigente por vocero: LOCF sobre IdBrigada en UsuarioLog
+  estructura <- usuario_log |>
+    dplyr::arrange(IdUsuario, FechaInsert) |>
+    dplyr::group_by(IdUsuario) |>
+    tidyr::fill(IdBrigada, .direction = "down") |>
+    dplyr::slice_tail(n = 1) |>
+    dplyr::ungroup() |>
+    dplyr::select(IdUsuario, IdBrigada)
+
+  # Coordinador vigente por brigada al corte: LOCF sobre BrigadasLog
+  brigada_corte <- resolver_coordinador_en_fecha(brigada_log, corte)
+
+  # Catálogo de coordinadores válidos (cargo correcto)
+  cat_coord <- usuarios |>
+    dplyr::filter(IdCargo == !!id_cargo_supervisor) |>
+    dplyr::transmute(
+      Id,
+      nombre_coordinador = paste(Nombre, APaterno, AMaterno),
+      supervisor         = Num,
+      status_supervisor  = Status
+    )
+
+  # Voceros → brigada → coordinador
+  base_aux <- estructura |>
     dplyr::inner_join(
       usuarios |>
         dplyr::transmute(
           Id,
           nombre_vocero = paste(Nombre, APaterno, AMaterno),
-          vocero = Num,
-          status_vocero = Status,
-          IdCargoVocero = IdCargo
+          vocero        = Num,
+          status_vocero = Status
         ),
       by = dplyr::join_by(IdUsuario == Id)
     ) |>
+    dplyr::filter(as.logical(status_vocero), !is.na(IdBrigada)) |>
+    dplyr::left_join(
+      brigada_corte |> dplyr::select(id_brigada, id_coordinador_log),
+      by = dplyr::join_by(IdBrigada == id_brigada)
+    ) |>
+    dplyr::left_join(
+      cat_coord,
+      by = dplyr::join_by(id_coordinador_log == Id)
+    ) |>
+    dplyr::filter(!is.na(nombre_coordinador)) |>
     dplyr::mutate(dplyr::across(
       dplyr::contains("nombre"),
       ~ gsub("  ", " ", stringr::str_to_upper(stringr::str_squish(.x)))
-    )) |>
-    dplyr::filter(as.logical(status_vocero), IdCargoSupervisor == !!id_cargo_supervisor)
+    ))
 
+  # Coordinadores como filas propias (para el dropdown del cuestionario)
   coordinadores_voceros <- base_aux |>
-    dplyr::distinct(IdSupervisor, .keep_all = TRUE) |>
+    dplyr::distinct(id_coordinador_log, .keep_all = TRUE) |>
     dplyr::filter(status_supervisor == TRUE) |>
     dplyr::left_join(
       usuarios_encuesta |> dplyr::select(UsuarioId, EncuestaId),
-      by = dplyr::join_by(IdSupervisor == UsuarioId)
+      by = dplyr::join_by(id_coordinador_log == UsuarioId)
     ) |>
     dplyr::filter(EncuestaId %in% ids_encuestas_dialogo) |>
-    dplyr::distinct(IdSupervisor, .keep_all = TRUE) |>
+    dplyr::distinct(id_coordinador_log, .keep_all = TRUE) |>
     dplyr::mutate(
-      IdUsuario = IdSupervisor,
+      IdUsuario     = id_coordinador_log,
       nombre_vocero = nombre_coordinador,
-      vocero = supervisor,
+      vocero        = supervisor,
       status_vocero = status_supervisor
     )
 
@@ -216,6 +232,8 @@ ensamblar_json_final <- function(
 #' @param id_pase_lista Numeric. ID del cuestionario de pase de lista a modificar.
 #' @param ids_encuestas_dialogo Numeric vector. IDs de los cuestionarios operativos.
 #' @param id_cargo_supervisor Numeric. ID del cargo que funge como coordinador. Por defecto 37.
+#' @param corte Date. Fecha de corte para resolver el coordinador vigente por brigada desde
+#'   BrigadasLog. Por defecto `Sys.Date()`.
 #' @param dir_backup Character. Carpeta donde se guardarán los respaldos del JSON. Por defecto "backups_pl".
 #'
 #' @return Invisible TRUE si la actualización en BD es exitosa.
@@ -226,6 +244,7 @@ actualizar_pase_lista <- function(
   id_pase_lista,
   ids_encuestas_dialogo,
   id_cargo_supervisor = 37,
+  corte = Sys.Date(),
   dir_backup = "backups_pl"
 ) {
   # 1. Construir jerarquía operativa
@@ -233,7 +252,8 @@ actualizar_pase_lista <- function(
     pool,
     id_proyecto,
     ids_encuestas_dialogo,
-    id_cargo_supervisor
+    id_cargo_supervisor,
+    corte
   )
 
   # 2. Extraer JSON molde de la BD
