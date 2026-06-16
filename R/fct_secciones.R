@@ -15,10 +15,10 @@
 #'   interpretable por R como fecha).
 #' @param base_coordinadores Data frame opcional con la asignación de voceros a
 #'   coordinadores y brigadas. Debe contener las columnas \code{vocero} y
-#'   \code{nombre_brigada}. La columna \code{nombre_coordinador}, si está
-#'   presente, es ignorada en esta versión. Si se provee, se añade la columna
-#'   \code{BRIGADAS} con los nombres colapsados. Si es \code{NULL}
-#'   (predeterminado) esa columna no aparece.
+#'   \code{nombre_brigada}. Si se provee, se añade la columna
+#'   \code{BRIGADAS} con los nombres colapsados; es \code{NA} cuando ningún
+#'   registro de actividad en esa sección coincide con un vocero conocido.
+#'   Si es \code{NULL} (predeterminado) esa columna no aparece.
 #'
 #' @return Data frame con \strong{una fila por sección}, columnas en mayúsculas
 #'   con espacios, que incluye viviendas visitadas, días trabajados, diálogos
@@ -31,12 +31,11 @@
 #' @export
 #'
 #' @section Seguridad y Privacidad:
-#'   Esta función procesa datos de actividad de campo que pueden contener
-#'   identificadores de usuarios (\code{usuario_num}) y secciones electorales.
+#'   Nivel de datos: INTERNO (identificadores de usuarios y brigadas de campo).
 #'   No persiste datos en disco ni los transmite a servicios externos. Asegúrese
 #'   de que los data frames de entrada provengan de fuentes autorizadas y de que
 #'   los resultados se compartan únicamente con destinatarios con acceso
-#'   aprobado.
+#'   aprobado. Control ISO 27001: A.8.2 (Clasificación de información).
 meta_usuario_condicional <- function(
   bd_actividad,
   metas,
@@ -75,7 +74,10 @@ meta_usuario_condicional <- function(
         dias_trabajados      = dplyr::n_distinct(fecha),
         diálogos_efectivos   = sum(desglose == "Efectivo", na.rm = TRUE),
         fechas_visita        = toString(sort(unique(fecha))),
-        brigadas             = toString(sort(unique(na.omit(nombre_brigada)))),
+        brigadas             = {
+          vals <- sort(unique(na.omit(nombre_brigada)))
+          if (length(vals) == 0L) NA_character_ else toString(vals)
+        },
         .by = "seccion"
       )
   } else {

@@ -106,6 +106,35 @@ test_that("meta_usuario_condicional colapsa brigadas cuando se provee base_coord
   expect_equal(resultado$`AVANCE META`[resultado$SECCION == "0002"], 0.2)
 })
 
+test_that("meta_usuario_condicional produce NA en BRIGADAS cuando no hay vocero coincidente", {
+  mock_actividad <- tibble::tibble(
+    seccion     = c("0001", "0002"),
+    fecha       = as.Date("2026-03-26"),
+    desglose    = c("Efectivo", "Efectivo"),
+    usuario_num = c(99L, 1L)  # 99 no existe en coordinadores
+  )
+
+  mock_coordinadores <- tibble::tibble(
+    vocero         = 1L,
+    nombre_brigada = "Brigada 1"
+  )
+
+  mock_metas <- tibble::tibble(
+    seccion = c("0001", "0002"),
+    meta    = c(10, 5)
+  )
+
+  resultado <- meta_usuario_condicional(
+    bd_actividad       = mock_actividad,
+    metas              = mock_metas,
+    corte              = as.Date("2026-03-26"),
+    base_coordinadores = mock_coordinadores
+  )
+
+  expect_true(is.na(resultado$BRIGADAS[resultado$SECCION == "0001"]))
+  expect_equal(resultado$BRIGADAS[resultado$SECCION == "0002"], "Brigada 1")
+})
+
 test_that("meta_usuario_condicional colapsa múltiples brigadas por sección", {
   mock_actividad <- tibble::tibble(
     seccion     = c("0001", "0001", "0002"),
