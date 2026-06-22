@@ -23,6 +23,9 @@ test_that("meta_usuario_condicional calcula avance correctamente sin coordinador
 
   avance_0002 <- resultado$`AVANCE META`[resultado$SECCION == "0002"]
   expect_equal(avance_0002, 0)
+
+  expect_true("FECHAS VISITA" %in% names(resultado))
+  expect_equal(resultado$`FECHAS VISITA`[resultado$SECCION == "0001"], "2026-03-26")
 })
 
 test_that("meta_usuario_condicional no pierde secciones de bd_actividad", {
@@ -68,11 +71,11 @@ test_that("meta_usuario_condicional no produce NA en AVANCE META", {
   expect_false(any(is.na(resultado$`AVANCE META`)))
 })
 
-test_that("meta_usuario_condicional agrupa por coordinador cuando se provee base_coordinadores", {
+test_that("meta_usuario_condicional colapsa brigadas cuando se provee base_coordinadores", {
   mock_actividad <- tibble::tibble(
-    seccion    = c("0001", "0001", "0002"),
-    fecha      = as.Date("2026-03-26"),
-    desglose   = c("Efectivo", "No Efectivo", "Efectivo"),
+    seccion     = c("0001", "0001", "0002"),
+    fecha       = as.Date("2026-03-26"),
+    desglose    = c("Efectivo", "No Efectivo", "Efectivo"),
     usuario_num = c(1L, 1L, 2L)
   )
 
@@ -94,15 +97,70 @@ test_that("meta_usuario_condicional agrupa por coordinador cuando se provee base
     base_coordinadores = mock_coordinadores
   )
 
-  expect_true("NOMBRE COORDINADOR" %in% names(resultado))
-  expect_true("NOMBRE BRIGADA" %in% names(resultado))
+  expect_true("BRIGADAS" %in% names(resultado))
+  expect_false("NOMBRE COORDINADOR" %in% names(resultado))
   expect_equal(nrow(resultado), 2)
-  expect_equal(
-    resultado$`AVANCE META`[resultado$SECCION == "0001"],
-    0.1
+  expect_equal(resultado$BRIGADAS[resultado$SECCION == "0001"], "Brigada 1")
+  expect_equal(resultado$BRIGADAS[resultado$SECCION == "0002"], "Brigada 2")
+  expect_equal(resultado$`AVANCE META`[resultado$SECCION == "0001"], 0.1)
+  expect_equal(resultado$`AVANCE META`[resultado$SECCION == "0002"], 0.2)
+})
+
+test_that("meta_usuario_condicional produce NA en BRIGADAS cuando no hay vocero coincidente", {
+  mock_actividad <- tibble::tibble(
+    seccion     = c("0001", "0002"),
+    fecha       = as.Date("2026-03-26"),
+    desglose    = c("Efectivo", "Efectivo"),
+    usuario_num = c(99L, 1L)  # 99 no existe en coordinadores
   )
-  expect_equal(
-    resultado$`AVANCE META`[resultado$SECCION == "0002"],
-    0.2
+
+  mock_coordinadores <- tibble::tibble(
+    vocero         = 1L,
+    nombre_brigada = "Brigada 1"
   )
+
+  mock_metas <- tibble::tibble(
+    seccion = c("0001", "0002"),
+    meta    = c(10, 5)
+  )
+
+  resultado <- meta_usuario_condicional(
+    bd_actividad       = mock_actividad,
+    metas              = mock_metas,
+    corte              = as.Date("2026-03-26"),
+    base_coordinadores = mock_coordinadores
+  )
+
+  expect_true(is.na(resultado$BRIGADAS[resultado$SECCION == "0001"]))
+  expect_equal(resultado$BRIGADAS[resultado$SECCION == "0002"], "Brigada 1")
+})
+
+test_that("meta_usuario_condicional colapsa múltiples brigadas por sección", {
+  mock_actividad <- tibble::tibble(
+    seccion     = c("0001", "0001", "0002"),
+    fecha       = as.Date("2026-03-26"),
+    desglose    = c("Efectivo", "Efectivo", "Efectivo"),
+    usuario_num = c(1L, 2L, 3L)
+  )
+
+  mock_coordinadores <- tibble::tibble(
+    vocero             = c(1L, 2L, 3L),
+    nombre_coordinador = c("Coord A", "Coord A", "Coord B"),
+    nombre_brigada     = c("Brigada 1", "Brigada 2", "Brigada 3")
+  )
+
+  mock_metas <- tibble::tibble(
+    seccion = c("0001", "0002"),
+    meta    = c(10, 5)
+  )
+
+  resultado <- meta_usuario_condicional(
+    bd_actividad       = mock_actividad,
+    metas              = mock_metas,
+    corte              = as.Date("2026-03-26"),
+    base_coordinadores = mock_coordinadores
+  )
+
+  expect_equal(resultado$BRIGADAS[resultado$SECCION == "0001"], "Brigada 1, Brigada 2")
+  expect_equal(resultado$BRIGADAS[resultado$SECCION == "0002"], "Brigada 3")
 })
