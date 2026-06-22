@@ -10,6 +10,7 @@ actualizar_pase_lista(
   id_pase_lista,
   ids_encuestas_dialogo,
   id_cargo_supervisor = 37,
+  corte = Sys.Date(),
   dir_backup = "backups_pl"
 )
 }
@@ -23,6 +24,9 @@ actualizar_pase_lista(
 \item{ids_encuestas_dialogo}{Numeric vector. IDs de los cuestionarios operativos.}
 
 \item{id_cargo_supervisor}{Numeric. ID del cargo que funge como coordinador. Por defecto 37.}
+
+\item{corte}{Date. Fecha de corte para resolver el coordinador vigente por brigada desde
+BrigadasLog. Por defecto \code{Sys.Date()}.}
 
 \item{dir_backup}{Character. Carpeta donde se guardarán los respaldos del JSON. Por defecto "backups_pl".}
 }

@@ -2,9 +2,25 @@
 % Please edit documentation in R/fct_reporte_auditoria.R
 \name{generar_reporte_metricas}
 \alias{generar_reporte_metricas}
+\alias{generar_metricas_auditoria}
 \title{Generar Reporte de Métricas de Auditoría y Producción}
 \usage{
 generar_reporte_metricas(
+  pool,
+  insumos,
+  bd_completa,
+  bd_aux,
+  encuesta_id,
+  corte,
+  inicio_semanal = "lunes",
+  fin_semanal = "domingo",
+  simular_domingo = FALSE,
+  excluir_brigadas = NULL,
+  filtrar_historicos = FALSE,
+  path_historicos = NULL
+)
+
+generar_metricas_auditoria(
   pool,
   insumos,
   bd_completa,

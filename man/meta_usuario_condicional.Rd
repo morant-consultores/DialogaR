@@ -2,7 +2,7 @@
 % Please edit documentation in R/fct_secciones.R
 \name{meta_usuario_condicional}
 \alias{meta_usuario_condicional}
-\title{Calcular meta por sección y usuario con agrupación condicional}
+\title{Calcular meta por sección con brigadas y fechas colapsadas}
 \usage{
 meta_usuario_condicional(bd_actividad, metas, corte, base_coordinadores = NULL)
 }
@@ -19,28 +19,33 @@ contener al menos las columnas \code{seccion}, \code{fecha},
 interpretable por R como fecha).}
 
 \item{base_coordinadores}{Data frame opcional con la asignación de voceros a
-coordinadores y brigadas. Debe contener las columnas \code{vocero},
-\code{nombre_coordinador} y \code{nombre_brigada}. Si es \code{NULL}
-(predeterminado) la agrupación se realiza solo por sección.}
+coordinadores y brigadas. Debe contener las columnas \code{vocero} y
+\code{nombre_brigada}. Si se provee, se añade la columna
+\code{BRIGADAS} con los nombres colapsados; es \code{NA} cuando ningún
+registro de actividad en esa sección coincide con un vocero conocido.
+Si es \code{NULL} (predeterminado) esa columna no aparece.}
 }
 \value{
-Data frame con una fila por combinación de agrupación, columnas en
-mayúsculas con espacios, que incluye viviendas visitadas, días trabajados,
-diálogos efectivos, meta, fecha de corte y avance de meta (proporción
-numérica; \code{0} cuando la sección no tiene meta asignada o la meta es cero).
+Data frame con \strong{una fila por sección}, columnas en mayúsculas
+con espacios, que incluye viviendas visitadas, días trabajados, diálogos
+efectivos, fechas de visita (colapsadas con \code{toString}), meta, fecha
+de corte y avance de meta (proporción numérica; \code{0} cuando la sección
+no tiene meta asignada o la meta es cero). Cuando se provee
+\code{base_coordinadores} se añade la columna \code{BRIGADAS} con los
+nombres de brigada colapsados.
 }
 \description{
-Agrega la actividad de campo por sección geográfica y la cruza con las metas
-asignadas. Si se proporciona \code{base_coordinadores}, la agrupación incluye
-también el coordinador y la brigada responsable de cada sección.
+Agrega la actividad de campo por sección geográfica (una fila por sección)
+y la cruza con las metas asignadas. Las fechas de visita se colapsan en una
+sola celda con \code{toString}. Si se proporciona \code{base_coordinadores},
+las brigadas que visitaron cada sección también se colapsan en una celda.
 }
 \section{Seguridad y Privacidad}{
 
-Esta función procesa datos de actividad de campo que pueden contener
-identificadores de usuarios (\code{usuario_num}) y secciones electorales.
+Nivel de datos: INTERNO (identificadores de usuarios y brigadas de campo).
 No persiste datos en disco ni los transmite a servicios externos. Asegúrese
 de que los data frames de entrada provengan de fuentes autorizadas y de que
 los resultados se compartan únicamente con destinatarios con acceso
-aprobado.
+aprobado. Control ISO 27001: A.8.2 (Clasificación de información).
 }
 
