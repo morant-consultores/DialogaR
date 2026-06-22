@@ -273,3 +273,121 @@ test_that("actualizar_pase_lista incrementa una Version existente correctamente"
   )$Version
   expect_equal(version_nueva, 6L)
 })
+
+test_that("actualizar_pase_lista preserva comillas simples internas y neutraliza inyeccion SQL", {
+  con <- setup_mock_db_pl()
+  on.exit(DBI::dbDisconnect(con))
+
+  # Fila objetivo + fila centinela para detectar un DROP/DELETE inyectado
+  DBI::dbWriteTable(con, "Encuesta", tibble::tibble(
+    Id                = c(294L, 295L),
+    JsonData          = c(pase_lista_json(), pase_lista_json()),
+    Version           = c(2L, 9L),
+    FechaModificacion = c(NA_character_, NA_character_)
+  ))
+
+  # JSON válido con comillas simples internas y una carga de inyección SQL.
+  # Con glue::glue() literal, la apostrofe cerraba la cadena SQL y corrompía
+  # el blob; con glue_sql() debe persistir verbatim.
+  json_malicioso <- "{\"brigada\":\"O'Brien's\",\"inject\":\"'); DROP TABLE Encuesta; --\",\"pages\":[]}"
+
+  testthat::local_mocked_bindings(
+    construir_base_operativa_pl = function(...) {
+      tibble::tibble(
+        IdSupervisor = 1L, IdUsuario = 2L, IdBrigada = 10L,
+        NombreBrigada = "Alpha", nombre_coordinador = "ANA GARCIA X",
+        supervisor = "S01", status_supervisor = 1L,
+        nombre_vocero = "LUIS PEREZ Y", vocero = "V01",
+        status_vocero = 1L, IdCargoSupervisor = 37L, IdCargoVocero = 99L
+      )
+    },
+    extraer_json_molde = function(...) {
+      list(
+        json_crudo    = '{"title":"test"}',
+        tabla_paginas = tibble::tibble(
+          id = c(0, 1, 2), name = c("Inicial", "0", "Final"),
+          visible = c(NA, FALSE, NA),
+          elements = list(
+            tibble::tibble(type = "radiogroup", name = "Obtener_usuario", title = "Sup"),
+            tibble::tibble(type = "radiogroup", name = "asistencia_0", title = "Asistencia 0", visibleIf = "{Obtener_usuario} = ''0''"),
+            tibble::tibble(type = "text", name = "finalizar")
+          )
+        )
+      )
+    },
+    generar_paginas_dinamicas = function(...) list('{"name":"V01"}'),
+    ensamblar_json_final      = function(...) json_malicioso,
+    .package = "DialogaR"
+  )
+
+  actualizar_pase_lista(
+    pool = con, id_proyecto = 17L, id_pase_lista = 294L,
+    ids_encuestas_dialogo = c(292L, 2923L), dir_backup = tempdir()
+  )
+
+  # La tabla y la fila centinela sobreviven: no hubo inyección
+  expect_true(DBI::dbExistsTable(con, "Encuesta"))
+  expect_equal(
+    DBI::dbGetQuery(con, "SELECT Version FROM Encuesta WHERE Id = 295")$Version,
+    9L
+  )
+
+  # El JSON se almacenó intacto, comillas incluidas
+  fila <- DBI::dbGetQuery(con, "SELECT JsonData, Version FROM Encuesta WHERE Id = 294")
+  expect_equal(fila$JsonData, json_malicioso)
+  expect_equal(fila$Version, 3L)
+})
+
+test_that("actualizar_pase_lista aborta sin ejecutar UPDATE cuando el JSON es invalido", {
+  con <- setup_mock_db_pl()
+  on.exit(DBI::dbDisconnect(con))
+
+  DBI::dbWriteTable(con, "Encuesta", tibble::tibble(
+    Id                = 294L,
+    JsonData          = pase_lista_json(),
+    Version           = 5L,
+    FechaModificacion = NA_character_
+  ))
+
+  testthat::local_mocked_bindings(
+    construir_base_operativa_pl = function(...) {
+      tibble::tibble(
+        IdSupervisor = 1L, IdUsuario = 2L, IdBrigada = 10L,
+        NombreBrigada = "Alpha", nombre_coordinador = "ANA GARCIA X",
+        supervisor = "S01", status_supervisor = 1L,
+        nombre_vocero = "LUIS PEREZ Y", vocero = "V01",
+        status_vocero = 1L, IdCargoSupervisor = 37L, IdCargoVocero = 99L
+      )
+    },
+    extraer_json_molde = function(...) {
+      list(
+        json_crudo    = '{"title":"test"}',
+        tabla_paginas = tibble::tibble(
+          id = c(0, 1, 2), name = c("Inicial", "0", "Final"),
+          visible = c(NA, FALSE, NA),
+          elements = list(
+            tibble::tibble(type = "radiogroup", name = "Obtener_usuario", title = "Sup"),
+            tibble::tibble(type = "radiogroup", name = "asistencia_0", title = "Asistencia 0", visibleIf = "{Obtener_usuario} = ''0''"),
+            tibble::tibble(type = "text", name = "finalizar")
+          )
+        )
+      )
+    },
+    generar_paginas_dinamicas = function(...) list('{"name":"V01"}'),
+    ensamblar_json_final      = function(...) '{"title": roto, "pages":',
+    .package = "DialogaR"
+  )
+
+  expect_error(
+    actualizar_pase_lista(
+      pool = con, id_proyecto = 17L, id_pase_lista = 294L,
+      ids_encuestas_dialogo = c(292L, 2923L), dir_backup = tempdir()
+    ),
+    regexp = "inválido"
+  )
+
+  # El UPDATE no debe haberse ejecutado: Version y JsonData intactos
+  fila <- DBI::dbGetQuery(con, "SELECT JsonData, Version FROM Encuesta WHERE Id = 294")
+  expect_equal(fila$Version, 5L)
+  expect_equal(fila$JsonData, pase_lista_json())
+})
