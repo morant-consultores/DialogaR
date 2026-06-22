@@ -39,6 +39,20 @@ setup_etl_db <- function() {
     stringsAsFactors = FALSE
   ))
 
+  DBI::dbWriteTable(con, "ZonaDeTrabajo", data.frame(
+    IdZona = 1L,
+    Descripcion = "6B",
+    IdProyecto = 10L,
+    stringsAsFactors = FALSE
+  ))
+
+  DBI::dbWriteTable(con, "Grupos", data.frame(
+    Id = 1L,
+    Descripcion = "Cots",
+    IdProyecto = 10L,
+    stringsAsFactors = FALSE
+  ))
+
   DBI::dbWriteTable(con, "UsuarioLog", data.frame(
     IdHistorico = 1L,
     IdUsuario = 1L,
@@ -109,6 +123,31 @@ test_that("cargar_insumos returns list with expected structure", {
   expect_equal(nrow(resultado$bd_actividad), 1L)
 })
 
+test_that("cargar_insumos resuelve nombre de zona de trabajo y grupo en bd_aux", {
+  con <- setup_etl_db()
+  on.exit(DBI::dbDisconnect(con))
+
+  fuentes <- list(list(
+    tabla = "Actividad",
+    select_cols = c("fecha", "usuario_num", "seccion", "desglose", "duracion_minutos"),
+    origen = "Actividad"
+  ))
+
+  resultado <- cargar_insumos(
+    pool = con,
+    id_proyecto = 10L,
+    corte = as.Date("2026-03-31"),
+    fuentes_actividad = fuentes
+  )
+
+  bd_aux <- resultado$bd_aux
+  expect_true(all(c("nombre_zona_trabajo", "nombre_grupo") %in% names(bd_aux)))
+  # ZonaDeTrabajo IdZona=1 → "6B"; Grupos Id=1 → "Cots" (vía BrigadasLog LOCF).
+  vocero_row <- bd_aux[bd_aux$vocero == "001", ]
+  expect_equal(vocero_row$nombre_zona_trabajo, "6B")
+  expect_equal(vocero_row$nombre_grupo, "Cots")
+})
+
 test_that("cargar_insumos applies postprocess_insumos hook", {
   con <- setup_etl_db()
   on.exit(DBI::dbDisconnect(con))
@@ -164,6 +203,8 @@ test_that("cargar_insumos respeta cargo_coordinador personalizado", {
     stringsAsFactors = FALSE
   ))
   DBI::dbWriteTable(con, "Municipios", data.frame(Id = 1L, Municipio = "Centro", stringsAsFactors = FALSE))
+  DBI::dbWriteTable(con, "ZonaDeTrabajo", data.frame(IdZona = 1L, Descripcion = "6B", IdProyecto = 10L, stringsAsFactors = FALSE))
+  DBI::dbWriteTable(con, "Grupos", data.frame(Id = 1L, Descripcion = "Cots", IdProyecto = 10L, stringsAsFactors = FALSE))
   DBI::dbWriteTable(con, "UsuarioLog", data.frame(
     IdHistorico = 1L, IdUsuario = 1L, IdCargo = 1L, IdEstado = 1L,
     IdMunicipio = 1L, IdZonaDeTabajo = 1L, IdSupervisor = 2L, IdBrigada = 100L,
@@ -616,6 +657,27 @@ test_that("construir_bd_aux: vocero queda vinculado a su brigada y coordinador",
   expect_equal(vocero_row$nombre_coordinador, "CARLOS SOTO")
 })
 
+test_that("construir_bd_aux: nombre_zona_trabajo/nombre_grupo NA sin catálogos", {
+  ec <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 100L)
+  result <- construir_bd_aux(ec, ucat_bd, ccat_bd, bcat_bd, mcat_bd)
+  expect_true(all(c("nombre_zona_trabajo", "nombre_grupo") %in% names(result)))
+  expect_true(all(is.na(result$nombre_zona_trabajo)))
+  expect_true(all(is.na(result$nombre_grupo)))
+})
+
+test_that("construir_bd_aux: resuelve nombres desde zonas_cat/grupos_cat", {
+  ec <- make_ec(id_brigada_vocero = 100L, id_brigada_coord = 100L)
+  zonas_cat  <- dplyr::tibble(id_zona_trabajo = 1L, nombre_zona_trabajo = "6B")
+  grupos_cat <- dplyr::tibble(id_grupo = 1L, nombre_grupo = "Cots")
+  result <- construir_bd_aux(
+    ec, ucat_bd, ccat_bd, bcat_bd, mcat_bd,
+    zonas_cat = zonas_cat, grupos_cat = grupos_cat
+  )
+  vocero_row <- result[result$vocero == "001", ]
+  expect_equal(vocero_row$nombre_zona_trabajo, "6B")
+  expect_equal(vocero_row$nombre_grupo, "Cots")
+})
+
 test_that("construir_bd_aux: usuario sin match en usuarios_cat tiene vocero NA", {
   ec_desconocido <- dplyr::tibble(
     id_usuario    = c(99L, 2L),
@@ -760,6 +822,9 @@ setup_coord_removido_db <- function() {
     Municipio = "Centro",
     stringsAsFactors = FALSE
   ))
+
+  DBI::dbWriteTable(con, "ZonaDeTrabajo", data.frame(IdZona = 1L, Descripcion = "6B", IdProyecto = 10L, stringsAsFactors = FALSE))
+  DBI::dbWriteTable(con, "Grupos", data.frame(Id = 1L, Descripcion = "Cots", IdProyecto = 10L, stringsAsFactors = FALSE))
 
   # Coordinador (id=2) se auto-supervisa (IdSupervisor = 2).
   DBI::dbWriteTable(con, "UsuarioLog", data.frame(

@@ -112,6 +112,28 @@ cargar_municipios_cat <- function(pool) {
     )
 }
 
+cargar_zonas_trabajo_cat <- function(pool) {
+  dplyr::tbl(pool, "ZonaDeTrabajo") |>
+    dplyr::select(IdZona, Descripcion) |>
+    dplyr::collect() |>
+    dplyr::transmute(
+      id_zona_trabajo     = IdZona,
+      nombre_zona_trabajo = Descripcion
+    ) |>
+    dplyr::distinct(id_zona_trabajo, .keep_all = TRUE)
+}
+
+cargar_grupos_cat <- function(pool) {
+  dplyr::tbl(pool, "Grupos") |>
+    dplyr::select(Id, Descripcion) |>
+    dplyr::collect() |>
+    dplyr::transmute(
+      id_grupo     = Id,
+      nombre_grupo = Descripcion
+    ) |>
+    dplyr::distinct(id_grupo, .keep_all = TRUE)
+}
+
 cargar_usuario_log <- function(pool, id_proyecto) {
   tbl(pool, "UsuarioLog") |>
     filter(IdProyecto == !!id_proyecto) |>
@@ -276,7 +298,9 @@ construir_bd_aux <- function(
   coordinadores_cat,
   brigada_corte,
   municipios_cat,
-  brigadas_cat = NULL
+  brigadas_cat = NULL,
+  zonas_cat = NULL,
+  grupos_cat = NULL
 ) {
   bd_base <- estructura_corte |>
     dplyr::left_join(municipios_cat, by = "id_municipio")
@@ -310,6 +334,20 @@ construir_bd_aux <- function(
       coordinadores_cat,
       by = c("id_coordinador_log" = "id_supervisor")
     )
+
+  # Nombres de zona de trabajo y grupo (catálogos ZonaDeTrabajo / Grupos).
+  # Catálogos opcionales: cuando son NULL, se conservan las columnas de nombre
+  # como NA para no romper consumidores que esperan su presencia.
+  bd <- if (!is.null(zonas_cat)) {
+    dplyr::left_join(bd, zonas_cat, by = "id_zona_trabajo")
+  } else {
+    dplyr::mutate(bd, nombre_zona_trabajo = NA_character_)
+  }
+  bd <- if (!is.null(grupos_cat)) {
+    dplyr::left_join(bd, grupos_cat, by = "id_grupo")
+  } else {
+    dplyr::mutate(bd, nombre_grupo = NA_character_)
+  }
 
   # Detectar brigadas con id_coordinador_log que no existe en coordinadores_cat.
   brigadas_coord_invalido <- bd |>
@@ -348,7 +386,9 @@ construir_bd_aux <- function(
       municipio          = municipio_log,
       nombre_brigada     = nombre_brigada_log,
       id_zona_trabajo,
+      nombre_zona_trabajo,
       id_grupo,
+      nombre_grupo,
       nombre_coordinador,
       supervisor,
       status_coord,
@@ -506,6 +546,8 @@ cargar_insumos <- function(
   coordinadores_cat   <- cargar_coordinadores_cat(pool, id_proyecto, cargo_coordinador)
   brigadas_cat        <- cargar_brigadas_cat(pool, id_proyecto)
   municipios_cat      <- cargar_municipios_cat(pool)
+  zonas_cat           <- cargar_zonas_trabajo_cat(pool)
+  grupos_cat          <- cargar_grupos_cat(pool)
   usuario_log         <- cargar_usuario_log(pool, id_proyecto)
   brigada_log         <- cargar_brigada_log(pool, id_proyecto)
   num_map             <- dplyr::tbl(pool, "Usuarios") |>
@@ -532,7 +574,9 @@ cargar_insumos <- function(
     usuarios_cat,
     coordinadores_cat,
     brigada_corte,
-    municipios_cat
+    municipios_cat,
+    zonas_cat = zonas_cat,
+    grupos_cat = grupos_cat
   )
 
   pase_lista <- list()
@@ -559,6 +603,8 @@ cargar_insumos <- function(
       brigadas    = brigadas_cat,
       brigada_log = brigada_log,
       municipios  = municipios_cat,
+      zonas       = zonas_cat,
+      grupos      = grupos_cat,
       usuario_log = usuario_log,
       num_map     = num_map
     )
