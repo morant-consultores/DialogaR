@@ -4,7 +4,11 @@
 \alias{conectar_base_datos}
 \title{Conectar a la Base de Datos SQL Server (Pool)}
 \usage{
-conectar_base_datos()
+conectar_base_datos(perfil = Sys.getenv("DIALOGA_ENV", unset = ""))
+}
+\arguments{
+\item{perfil}{Character. Prefijo de perfil para las variables de entorno. Por defecto
+usa \code{DIALOGA_ENV} si está definida, o \code{""} (producción). Usa \code{"dev"} para DEVSVNET-V2.}
 }
 \value{
 Un objeto de clase \code{Pool} listo para ser utilizado con \code{dplyr} o \code{DBI}.
@@ -18,10 +22,15 @@ para asignar el driver ODBC correcto.
 \details{
 \strong{Selección Automática de Driver:}
 \itemize{
-\item Si existe la variable de entorno \code{pool_driver}, utiliza esa.
+\item Si existe la variable de entorno \verb{pool_<perfil>_driver} (o \code{pool_driver}), utiliza esa.
 \item Si el Sistema Operativo es Windows o Mac (Darwin), utiliza \verb{ODBC Driver 17 for SQL Server}.
 \item Si el Sistema Operativo es Linux (Positron Connect), utiliza \code{FreeTDS}.
 }
+
+\strong{Perfiles de entorno:}
+Cuando \code{perfil = ""} (producción, default), lee \code{pool_server}, \code{pool_database}, etc.
+Cuando \code{perfil = "dev"}, lee \code{pool_dev_server}, \code{pool_dev_database}, etc.
+El perfil también puede fijarse globalmente con la variable de entorno \code{DIALOGA_ENV}.
 
 \strong{Cumplimiento ISO 27001:} Previene la exposición de credenciales mediante el uso
 estricto de variables de entorno.

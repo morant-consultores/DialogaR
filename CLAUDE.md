@@ -211,4 +211,47 @@ Todo archivo `.R` nuevo en `R/` debe iniciar con este bloque antes del primer `#
 # ============================================================
 ```
 
+## Estrategia de versiones
+
+Este repositorio mantiene **dos versiones instalables simultáneas**:
+
+| Versión | Rama | Tag git | Estado |
+|---------|------|---------|--------|
+| `0.2.0` | `master` | `v0.2.0` | Estable. Proyectos Chihuahua, Juárez, Sur. |
+| `0.3.0.9000` | `feat/brigada-log-coordinator` | — (dev) | Activo. Proyectos que requieren resolución de coordinador desde `BrigadasLog`. |
+
+### Qué introduce v0.3.0
+
+- `cargar_brigada_log()` — carga histórico de asignaciones de brigada desde `BrigadasLog`
+- `resolver_coordinador_en_fecha()` — LOCF sobre `BrigadasLog` para determinar coordinador vigente al corte
+- `conectar_base_datos(perfil = "dev")` — soporte multi-entorno (producción / DEVSVNET-V2) vía variables de entorno `pool_dev_*`
+- Cambios en `cargar_actividad()`: campo `id_usuario_actividad` (cuando `UsuarioId` está presente en el snapshot), `usuario_num` ahora es condicional
+- `resolver_estructura_corte()`: elimina el fill de `IdSupervisor` (incompatible con proyectos que dependían de esa columna en v0.2.0)
+
+### Instalar por versión
+
+```r
+# Proyectos en v0.2.0 (estable):
+remotes::install_github("morant-consultores/DialogaR@v0.2.0")
+
+# Proyectos en v0.3.x (BrigadasLog):
+remotes::install_github("morant-consultores/DialogaR@feat/brigada-log-coordinator")
+```
+
+### Scripts con guardia de versión
+
+Los scripts en `inst/scripts/` que usan funciones de v0.3.0 incluyen una guardia al inicio:
+
+```r
+if (utils::packageVersion("DialogaR") < "0.3.0") {
+  stop("Este script requiere DialogaR >= 0.3.0 ...", call. = FALSE)
+}
+```
+
+Scripts con guardia activa: `04_run_sonora_insumos.R`, `00_test_devsvnet.R`.
+
+### Ruta de migración
+
+Cuando todos los proyectos hayan validado v0.3.0, mergear `feat/brigada-log-coordinator` → `master`, tagear `v0.3.0`, y eliminar la guardia de los scripts (ya no serán necesarias).
+
 

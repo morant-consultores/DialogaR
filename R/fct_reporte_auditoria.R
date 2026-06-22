@@ -395,3 +395,7 @@ crear_workbook_auditoria <- function(datos_auditoria) {
   cli::cli_alert_success("Libro de Excel creado exitosamente en memoria.")
   return(wb)
 }
+
+#' @rdname generar_reporte_metricas
+#' @export
+generar_metricas_auditoria <- generar_reporte_metricas

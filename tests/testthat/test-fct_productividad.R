@@ -6,10 +6,12 @@
 
 make_bd_aux_prod <- function() {
   tibble::tibble(
-    distrito           = "06",
-    municipio          = "Centro",
-    nombre_brigada     = "06_BRIGADA NORTE",
-    nombre_coordinador = "CARLOS SOTO",
+    distrito            = "06",
+    municipio           = "Centro",
+    nombre_brigada      = "06_BRIGADA NORTE",
+    nombre_zona_trabajo = "HERMOSILLO",
+    nombre_grupo        = "LV_HMO",
+    nombre_coordinador  = "CARLOS SOTO",
     supervisor         = "002",
     status_coord       = TRUE,
     nombre_vocero      = "JUAN PEREZ",
@@ -72,6 +74,25 @@ test_that("generar_reporte_productividad bd_prod has required columns", {
   expect_s3_class(resultado$bd_prod, "data.frame")
   expected_cols <- c("nombre_brigada", "nombre_coordinador", "nombre_vocero", "vocero")
   expect_true(all(expected_cols %in% names(resultado$bd_prod)))
+})
+
+test_that("generar_reporte_productividad: fila de coordinador hereda zona y grupo de su brigada", {
+  corte <- as.Date("2026-03-25")
+
+  resultado <- generar_reporte_productividad(
+    bd_aux        = make_bd_aux_prod(),
+    actividad_dia = make_actividad_dia(corte),
+    corte         = corte,
+    pl_main       = make_pl_main(corte)
+  )
+
+  bd_prod <- resultado$bd_prod
+  # No se exponen los IDs crudos, solo los nombres.
+  expect_false(any(c("id_zona_trabajo", "id_grupo") %in% names(bd_prod)))
+  # La fila del coordinador (vocero == supervisor) trae zona/grupo, no "-".
+  coord_row <- bd_prod[bd_prod$vocero == "002", ]
+  expect_equal(coord_row$nombre_zona_trabajo, "HERMOSILLO")
+  expect_equal(coord_row$nombre_grupo, "LV_HMO")
 })
 
 test_that("generar_reporte_productividad lenient policy succeeds with empty actividad", {

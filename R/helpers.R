@@ -144,60 +144,76 @@ autenticar_googledrive <- function() {
 #' @details
 #' **Selección Automática de Driver:**
 #' \itemize{
-#'   \item Si existe la variable de entorno `pool_driver`, utiliza esa.
+#'   \item Si existe la variable de entorno `pool_<perfil>_driver` (o `pool_driver`), utiliza esa.
 #'   \item Si el Sistema Operativo es Windows o Mac (Darwin), utiliza `ODBC Driver 17 for SQL Server`.
 #'   \item Si el Sistema Operativo es Linux (Positron Connect), utiliza `FreeTDS`.
 #' }
 #'
+#' **Perfiles de entorno:**
+#' Cuando `perfil = ""` (producción, default), lee `pool_server`, `pool_database`, etc.
+#' Cuando `perfil = "dev"`, lee `pool_dev_server`, `pool_dev_database`, etc.
+#' El perfil también puede fijarse globalmente con la variable de entorno `DIALOGA_ENV`.
+#'
 #' **Cumplimiento ISO 27001:** Previene la exposición de credenciales mediante el uso
 #' estricto de variables de entorno.
+#'
+#' @param perfil Character. Prefijo de perfil para las variables de entorno. Por defecto
+#'   usa `DIALOGA_ENV` si está definida, o `""` (producción). Usa `"dev"` para DEVSVNET-V2.
 #'
 #' @return Un objeto de clase `Pool` listo para ser utilizado con `dplyr` o `DBI`.
 #'
 #' @importFrom pool dbPool
 #' @importFrom odbc odbc
 #' @export
-conectar_base_datos <- function() {
-  # 1. Leer credenciales seguras desde el entorno
-  server <- Sys.getenv("pool_server")
-  database <- Sys.getenv("pool_database")
-  uid <- Sys.getenv("pool_uid")
-  pwd <- Sys.getenv("pool_pwd")
+conectar_base_datos <- function(perfil = Sys.getenv("DIALOGA_ENV", unset = "")) {
+  # 1. Construir nombres de variables según el perfil
+  ev <- function(suffix) {
+    nombre <- if (nzchar(perfil)) paste0("pool_", perfil, "_", suffix) else paste0("pool_", suffix)
+    Sys.getenv(nombre)
+  }
+
+  server   <- ev("server")
+  database <- ev("database")
+  uid      <- ev("uid")
+  pwd      <- ev("pwd")
 
   # 2. Lógica Inteligente de Selección de Driver
-  driver_env <- Sys.getenv("pool_driver")
-  os_name <- Sys.info()[["sysname"]]
+  driver_env <- ev("driver")
+  os_name    <- Sys.info()[["sysname"]]
 
   if (driver_env != "") {
-    # Prioridad 1: Variable de entorno explícita
     driver_usar <- driver_env
   } else if (os_name %in% c("Windows", "Darwin")) {
-    # Prioridad 2: Entorno Local (Windows o Mac)
     driver_usar <- "ODBC Driver 17 for SQL Server"
   } else {
-    # Prioridad 3: Positron Connect o Servidores Linux
     driver_usar <- "FreeTDS"
   }
 
   # 3. Fail-fast de Seguridad
+  pfx_msg <- if (nzchar(perfil)) sprintf(" (perfil '%s')", perfil) else ""
   if (server == "" || uid == "" || pwd == "") {
+    ev_names <- if (nzchar(perfil)) {
+      sprintf("'pool_%s_server', 'pool_%s_database', 'pool_%s_uid', 'pool_%s_pwd'",
+              perfil, perfil, perfil, perfil)
+    } else {
+      "'pool_server', 'pool_database', 'pool_uid', 'pool_pwd'"
+    }
     stop(
-      "Error de Seguridad: Faltan credenciales de base de datos. ",
-      "Asegúrate de que 'pool_server', 'pool_database', 'pool_uid' y 'pool_pwd' ",
-      "estén definidos en tu archivo .Renviron o en las variables de Positron Connect."
+      sprintf("Error de Seguridad: Faltan credenciales de base de datos%s. ", pfx_msg),
+      sprintf("Asegúrate de que %s estén definidos en tu archivo .Renviron.", ev_names)
     )
   }
 
   # 4. Crear el pool de conexiones dinámico
   pool_obj <- pool::dbPool(
-    drv = odbc::odbc(),
-    Driver = driver_usar,
+    drv      = odbc::odbc(),
+    Driver   = driver_usar,
     Database = database,
-    Server = server,
-    UID = uid,
-    PWD = pwd,
-    Port = 1433,
-    timeout = 120
+    Server   = server,
+    UID      = uid,
+    PWD      = pwd,
+    Port     = 1433,
+    timeout  = 120
   )
 
   return(pool_obj)

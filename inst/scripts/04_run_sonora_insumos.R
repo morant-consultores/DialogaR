@@ -13,6 +13,15 @@
 # =========================================================================
 
 library(DialogaR)
+
+if (utils::packageVersion("DialogaR") < "0.3.0") {
+  stop(
+    "Este script requiere DialogaR >= 0.3.0 (rama feat/brigada-log-coordinator).\n",
+    "Instalar con: remotes::install_github('morant-consultores/DialogaR@feat/brigada-log-coordinator')",
+    call. = FALSE
+  )
+}
+
 library(dplyr)
 library(lubridate)
 library(googledrive)
@@ -175,9 +184,7 @@ insumos <- cargar_insumos(
   filtro_minimo_actividad = filtro_minimo_actividad,
   normalizador_actividad = normalizador_actividad,
   cargo_coordinador = cargo_coordinador,
-  postprocess_insumos = function(insumos) {
-    inferir_coordinador_desde_brigada(insumos, cargo_coordinador = cargo_coordinador)
-  }
+  postprocess_insumos = NULL
 )
 
 brigadas <- insumos$cat$brigadas

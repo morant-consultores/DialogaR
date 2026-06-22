@@ -11,7 +11,11 @@ construir_base_contactos(
   corte,
   bd_aux,
   na_chr = "-",
-  clasificacion = FALSE
+  clasificacion = FALSE,
+  voceros = NULL,
+  brigadas = NULL,
+  coordinadores = NULL,
+  aux_zonas = NULL
 )
 }
 \arguments{

@@ -357,6 +357,8 @@ ensamblar_productividad <- function(
         distrito,
         municipio,
         nombre_brigada,
+        nombre_zona_trabajo,
+        nombre_grupo,
         nombre_coordinador,
         supervisor,
         status_coord,
