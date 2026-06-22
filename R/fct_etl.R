@@ -32,7 +32,7 @@ cargar_usuarios_cat <- function(pool, id_proyecto, usuarios_asignados = NULL, ca
       Capacitacion == TRUE | Cargo == !!cargo_coordinador
     )
   if (!is.null(usuarios_asignados) && length(usuarios_asignados) > 0) {
-    q <- q |> dplyr::filter(Id %in% !!usuarios_asignados)
+    q <- q |> dplyr::filter(Id %in% !!usuarios_asignados | Cargo == !!cargo_coordinador)
   }
   q |>
     dplyr::select(
@@ -136,6 +136,20 @@ cargar_usuario_log <- function(pool, id_proyecto) {
     )
 }
 
+cargar_brigada_log <- function(pool, id_proyecto) {
+  dplyr::tbl(pool, "BrigadasLog") |>
+    dplyr::filter(IdProyecto == !!id_proyecto) |>
+    dplyr::select(
+      IdHistorico, BrigadaId, NombreBrigada,
+      IdUsuario, IdZonaDeTrabajo, IdGrupo, Activo, FechaInsert
+    ) |>
+    dplyr::collect() |>
+    dplyr::mutate(
+      ts_evento    = lubridate::as_datetime(lubridate::with_tz(FechaInsert, tzone = "America/Mexico_City")),
+      fecha_evento = lubridate::as_date(ts_evento)
+    )
+}
+
 # ---- 2) Loaders y Constructores Base (No exportados) --------------------
 
 cargar_actividad <- function(
@@ -157,24 +171,37 @@ cargar_actividad <- function(
     if (!is.null(filtro_minimo)) {
       q <- filtro_minimo(q, f)
     }
+
+    # Fechas por-fuente tienen prioridad sobre el global
+    f_fecha_min <- f$fecha_min %||% fecha_min
+    f_fecha_max <- f$fecha_max %||% fecha_max
+    if (!is.null(f_fecha_min)) {
+      q <- q |> dplyr::filter(fecha >= !!as.Date(f_fecha_min))
+    }
+    if (!is.null(f_fecha_max)) {
+      q <- q |> dplyr::filter(fecha <= !!as.Date(f_fecha_max))
+    }
+
     if (!is.null(f$select_cols)) {
       q <- q |> dplyr::select(dplyr::any_of(f$select_cols))
     }
-    if (!is.null(fecha_min)) {
-      q <- q |> dplyr::filter(fecha >= !!as.Date(fecha_min))
-    }
-    if (!is.null(fecha_max)) {
-      q <- q |> dplyr::filter(fecha <= !!as.Date(fecha_max))
-    }
 
-    df <- q |>
-      dplyr::collect() |>
+    df <- q |> dplyr::collect()
+    has_num <- "usuario_num" %in% names(df)
+    uid_col <- intersect(c("usuario_id", "UsuarioId"), names(df))[1]
+    has_uid <- !is.na(uid_col)
+    df <- df |>
       dplyr::mutate(
-        fecha = as.Date(fecha),
-        usuario_num = as.character(usuario_num),
-        seccion = sprintf("%04s", seccion),
+        fecha        = as.Date(fecha),
+        usuario_num  = if (has_num) as.character(usuario_num) else NA_character_,
+        id_usuario_actividad = if (has_uid) as.integer(.data[[uid_col]]) else NA_integer_,
         origen_datos = dplyr::coalesce(f$origen, f$tabla)
       )
+
+    # seccion: solo si existe (proyectos con AGEB no la tienen)
+    if ("seccion" %in% names(df)) {
+      df <- df |> dplyr::mutate(seccion = sprintf("%04s", seccion))
+    }
 
     if (!is.null(normalizador)) {
       df <- normalizador(df, f)
@@ -194,7 +221,7 @@ resolver_estructura_corte <- function(usuario_log, corte, usuarios_asignados = N
   q |>
     arrange(IdUsuario, IdHistorico) |>
     group_by(IdUsuario) |>
-    tidyr::fill(IdCargo, IdSupervisor, IdBrigada, .direction = "down") |>
+    tidyr::fill(IdCargo, IdBrigada, .direction = "down") |>
     slice_tail(n = 1) |>
     ungroup() |>
     transmute(
@@ -210,98 +237,64 @@ resolver_estructura_corte <- function(usuario_log, corte, usuarios_asignados = N
     )
 }
 
+#' Resolver coordinador histórico de cada brigada al corte
+#'
+#' @description
+#' Aplica LOCF sobre `BrigadasLog` para determinar qué coordinador estaba
+#' al frente de cada brigada en la fecha de corte, junto con la zona de trabajo
+#' y grupo vigentes en ese momento.
+#'
+#' @param brigada_log Data frame producido por `cargar_brigada_log()`.
+#' @param corte Date o character coercible a Date. Fecha límite del análisis.
+#'
+#' @return Un tibble con una fila por brigada con columnas:
+#'   `id_brigada`, `nombre_brigada_log`, `id_coordinador_log`,
+#'   `id_zona_trabajo`, `id_grupo`, `activo_brigada`.
+#'
+#' @export
+resolver_coordinador_en_fecha <- function(brigada_log, corte) {
+  brigada_log |>
+    dplyr::filter(fecha_evento <= as.Date(corte)) |>
+    dplyr::arrange(BrigadaId, IdHistorico) |>
+    dplyr::group_by(BrigadaId) |>
+    tidyr::fill(IdUsuario, IdZonaDeTrabajo, IdGrupo, NombreBrigada, .direction = "down") |>
+    dplyr::slice_tail(n = 1) |>
+    dplyr::ungroup() |>
+    dplyr::transmute(
+      id_brigada         = BrigadaId,
+      nombre_brigada_log = NombreBrigada,
+      id_coordinador_log = IdUsuario,
+      id_zona_trabajo    = IdZonaDeTrabajo,
+      id_grupo           = IdGrupo,
+      activo_brigada     = Activo
+    )
+}
+
 construir_bd_aux <- function(
   estructura_corte,
   usuarios_cat,
   coordinadores_cat,
-  brigadas_cat,
-  municipios_cat
+  brigada_corte,
+  municipios_cat,
+  brigadas_cat = NULL
 ) {
-  # Brigada canónica de cada coordinador: la brigada asignada a su propia fila
-  # en estructura_corte (resolver_estructura_corte ya garantiza 1 fila por usuario).
-  brigada_canon_coord <- estructura_corte |>
-    dplyr::select(id_supervisor = id_usuario, id_brigada_coord = id_brigada)
+  bd_base <- estructura_corte |>
+    dplyr::left_join(municipios_cat, by = "id_municipio")
 
-  estructura_enriquecida <- estructura_corte |>
-    dplyr::left_join(brigada_canon_coord, by = "id_supervisor")
-
-  # Detectar relaciones espurias: vocero en brigada distinta a la de su coordinador
-  espurias <- estructura_enriquecida |>
-    dplyr::filter(
-      !is.na(id_supervisor),
-      !is.na(id_brigada_coord),
-      id_brigada != id_brigada_coord
-    )
-
-  # Solo reportar espurias con vocero real: los slots vacíos (id_usuario sin match
-  # en usuarios_cat ni coordinadores_cat) ya se eliminan de bd_aux.
-  ids_reales <- unique(c(usuarios_cat$id_usuario, coordinadores_cat$id_supervisor))
-  espurias_reales <- espurias |>
-    dplyr::filter(id_usuario %in% ids_reales)
-
-  if (nrow(espurias_reales) > 0) {
-    resumen <- espurias_reales |>
-      dplyr::left_join(
-        brigadas_cat |> dplyr::select(id_brigada, nombre_brigada),
-        by = "id_brigada"
+  # brigada_corte de resolver_coordinador_en_fecha() (BrigadasLog LOCF).
+  # brigadas_cat como fallback cuando brigada_corte es NULL (compatibilidad).
+  bd_base <- if (!is.null(brigada_corte)) {
+    dplyr::left_join(bd_base, brigada_corte, by = "id_brigada")
+  } else {
+    dplyr::left_join(bd_base, brigadas_cat, by = "id_brigada") |>
+      dplyr::rename(
+        nombre_brigada_log = nombre_brigada,
+        id_coordinador_log = id_usuario_brigada
       ) |>
-      dplyr::left_join(
-        brigadas_cat |>
-          dplyr::transmute(
-            id_brigada_coord    = id_brigada,
-            nombre_brigada_coord = nombre_brigada
-          ),
-        by = "id_brigada_coord"
-      ) |>
-      dplyr::left_join(
-        coordinadores_cat |> dplyr::select(id_supervisor, num_coord = supervisor),
-        by = "id_supervisor"
-      ) |>
-      dplyr::count(
-        num_coord,
-        nombre_brigada_coord,
-        nombre_brigada,
-        name = "n_voceros"
-      ) |>
-      dplyr::arrange(num_coord)
-
-    lineas <- resumen |>
-      dplyr::transmute(
-        msg = sprintf(
-          "Coordinador %s (brigada '%s') supervisa %d vocero(s) asignados a brigada '%s'",
-          num_coord,
-          nombre_brigada_coord,
-          n_voceros,
-          nombre_brigada
-        )
-      ) |>
-      dplyr::pull(msg)
-
-    cli::cli_warn(c(
-      "!" = sprintf(
-        "bd_aux: %d relaci\u00f3n(es) espuria(s) coordinador\u2013brigada detectadas (solo alerta, no se excluyen).",
-        nrow(espurias_reales)
-      ),
-      stats::setNames(lineas, rep("*", length(lineas)))
-    ))
+      dplyr::mutate(id_zona_trabajo = id_zona_trabajo_brigada, id_grupo = NA_integer_)
   }
 
-  # Las relaciones espurias con vocero real nunca se excluyen: perder voceros de
-  # la estructura significa perder su actividad en todos los reportes posteriores.
-  # Las espurias sin vocero (slots vacíos de brigada ajena) sí se eliminan al final:
-  # no tienen actividad que proteger y pueden duplicar o malasignar filas de coordinador.
-  estructura_limpia <- estructura_enriquecida |>
-    dplyr::mutate(
-      es_espuria = !is.na(id_supervisor) &
-        !is.na(id_brigada_coord) &
-        id_brigada != id_brigada_coord
-    ) |>
-    dplyr::filter(!(es_espuria & !(id_usuario %in% ids_reales))) |>
-    dplyr::select(-id_brigada_coord, -es_espuria)
-
-  bd <- estructura_limpia |>
-    dplyr::left_join(municipios_cat, by = "id_municipio") |>
-    dplyr::left_join(brigadas_cat,   by = "id_brigada") |>
+  bd <- bd_base |>
     dplyr::left_join(
       usuarios_cat |>
         dplyr::transmute(
@@ -312,56 +305,35 @@ construir_bd_aux <- function(
         ),
       by = "id_usuario"
     ) |>
-    dplyr::left_join(coordinadores_cat, by = "id_supervisor")
-
-  # Detectar brigadas donde IdSupervisor no fue registrado en UsuarioLog pero
-  # existe un coordinador asignado a esa brigada en el catálogo de usuarios.
-  # Causa probable: omisión en la plataforma (no es un problema de datos propios).
-  coord_por_brigada <- usuarios_cat |>
-    dplyr::filter(id_usuario %in% coordinadores_cat$id_supervisor) |>
-    dplyr::select(id_brigada, id_coord = id_usuario) |>
-    dplyr::inner_join(
-      coordinadores_cat |> dplyr::select(id_supervisor, nombre_coordinador),
-      by = c("id_coord" = "id_supervisor")
+    # Coordinador desde BrigadasLog LOCF al corte (id_coordinador_log).
+    dplyr::left_join(
+      coordinadores_cat,
+      by = c("id_coordinador_log" = "id_supervisor")
     )
 
-  brigadas_sin_supervisor <- bd |>
-    dplyr::filter(is.na(nombre_coordinador), !is.na(id_brigada)) |>
-    dplyr::distinct(id_brigada, nombre_brigada) |>
-    dplyr::inner_join(coord_por_brigada, by = "id_brigada")
+  # Detectar brigadas con id_coordinador_log que no existe en coordinadores_cat.
+  brigadas_coord_invalido <- bd |>
+    dplyr::filter(!is.na(id_coordinador_log), is.na(nombre_coordinador), !is.na(vocero)) |>
+    dplyr::distinct(id_brigada, nombre_brigada_log, id_coordinador_log)
 
-  if (nrow(brigadas_sin_supervisor) > 0) {
-    n_voceros_afectados <- bd |>
-      dplyr::filter(
-        id_brigada %in% brigadas_sin_supervisor$id_brigada,
-        !is.na(vocero),
-        is.na(nombre_coordinador)
-      ) |>
-      nrow()
-
-    lineas <- brigadas_sin_supervisor |>
+  if (nrow(brigadas_coord_invalido) > 0) {
+    lineas <- brigadas_coord_invalido |>
       dplyr::transmute(msg = sprintf(
-        "Brigada '%s' — coordinador en cat\u00e1logo: %s (id: %d)",
-        nombre_brigada, nombre_coordinador, id_coord
+        "Brigada '%s' — IdUsuario=%d no encontrado en coordinadores (cargo o estado incorrecto en plataforma)",
+        nombre_brigada_log, id_coordinador_log
       )) |>
       dplyr::pull(msg)
 
     cli::cli_warn(c(
       "!" = sprintf(
-        "construir_bd_aux: %d brigada(s) con coordinador en cat\u00e1logo pero sin IdSupervisor en UsuarioLog (%d vocero(s) afectado(s)).",
-        nrow(brigadas_sin_supervisor), n_voceros_afectados
+        "construir_bd_aux: %d brigada(s) con coordinador en BrigadasLog pero sin resolver.",
+        nrow(brigadas_coord_invalido)
       ),
-      " " = "Causa: IdSupervisor no fue registrado en la plataforma para estos voceros.",
-      " " = "Acci\u00f3n: actualizar IdSupervisor en la plataforma.",
       stats::setNames(lineas, rep("*", length(lineas)))
     ))
   }
 
-  # Detectar si nombre_brigada codifica el distrito (formato "DD texto").
-  # Condición: al menos UNA brigada no-NA comienza con dos dígitos.
-  # Las brigadas sin prefijo numérico quedan con distrito NA.
-  # Solo cuando NINGUNA brigada tiene prefijo numérico se omite la extracción.
-  brigadas_unicas <- unique(bd$nombre_brigada)
+  brigadas_unicas <- unique(bd$nombre_brigada_log)
   brigadas_unicas <- brigadas_unicas[!is.na(brigadas_unicas)]
   usar_distrito   <- length(brigadas_unicas) > 0L &&
     any(grepl("^[0-9]{2}", brigadas_unicas))
@@ -369,12 +341,14 @@ construir_bd_aux <- function(
   bd |>
     dplyr::transmute(
       distrito = if (usar_distrito) {
-        stringr::str_extract(nombre_brigada, "^[0-9]{2}")
+        stringr::str_extract(nombre_brigada_log, "^[0-9]{2}")
       } else {
         NA_character_
       },
       municipio          = municipio_log,
-      nombre_brigada,
+      nombre_brigada     = nombre_brigada_log,
+      id_zona_trabajo,
+      id_grupo,
       nombre_coordinador,
       supervisor,
       status_coord,
@@ -424,12 +398,8 @@ cargar_pases_lista <- function(pool, ids_cuestionario, procesador_pl) {
 #' @importFrom tidyr fill
 #' @export
 resolver_brigada_en_fecha <- function(actividad, usuario_log, usuarios_cat, num_map = NULL) {
-  if (is.null(num_map)) {
-    num_map <- usuarios_cat |>
-      dplyr::select(id_usuario, num)
-  }
-
-  brigada_hist <- usuario_log |>
+  # Tabla histórica: id_usuario + fecha_evento → id_brigada (LOCF)
+  brigada_hist_id <- usuario_log |>
     dplyr::arrange(IdUsuario, IdHistorico) |>
     dplyr::group_by(IdUsuario) |>
     tidyr::fill(IdBrigada, .direction = "down") |>
@@ -437,10 +407,42 @@ resolver_brigada_en_fecha <- function(actividad, usuario_log, usuarios_cat, num_
     dplyr::slice_tail(n = 1) |>
     dplyr::ungroup() |>
     dplyr::transmute(
-      id_usuario = IdUsuario,
+      id_usuario   = IdUsuario,
       fecha_evento,
-      id_brigada = IdBrigada
+      id_brigada   = IdBrigada
     ) |>
+    dplyr::arrange(id_usuario, fecha_evento, dplyr::desc(!is.na(id_brigada))) |>
+    dplyr::distinct(id_usuario, fecha_evento, .keep_all = TRUE)
+
+  # Ruta directa: actividad tiene id_usuario_actividad (FK int a Usuarios.Id)
+  # Requiere ALL no-NA para garantizar que no haya rows sin resolver (hasta que
+  # el snapshot tenga UsuarioId completo con backpropagación)
+  tiene_id_usuario <- "id_usuario_actividad" %in% names(actividad) &&
+    all(!is.na(actividad$id_usuario_actividad))
+
+  if (tiene_id_usuario) {
+    return(
+      actividad |>
+        dplyr::select(-dplyr::any_of("id_brigada")) |>
+        dplyr::mutate(.row = dplyr::row_number()) |>
+        dplyr::left_join(
+          brigada_hist_id,
+          dplyr::join_by(id_usuario_actividad == id_usuario, fecha >= fecha_evento)
+        ) |>
+        dplyr::group_by(.row) |>
+        dplyr::slice_max(fecha_evento, n = 1, with_ties = FALSE) |>
+        dplyr::ungroup() |>
+        dplyr::select(-.row, -fecha_evento)
+    )
+  }
+
+  # Ruta legacy: actividad tiene usuario_num (string), requiere num_map
+  if (is.null(num_map)) {
+    num_map <- usuarios_cat |>
+      dplyr::select(id_usuario, num)
+  }
+
+  brigada_hist_num <- brigada_hist_id |>
     dplyr::inner_join(num_map, by = "id_usuario") |>
     dplyr::select(num, fecha_evento, id_brigada) |>
     dplyr::arrange(num, fecha_evento, dplyr::desc(!is.na(id_brigada))) |>
@@ -450,7 +452,7 @@ resolver_brigada_en_fecha <- function(actividad, usuario_log, usuarios_cat, num_
     dplyr::select(-dplyr::any_of("id_brigada")) |>
     dplyr::mutate(.row = dplyr::row_number()) |>
     dplyr::left_join(
-      brigada_hist,
+      brigada_hist_num,
       dplyr::join_by(usuario_num == num, fecha >= fecha_evento)
     ) |>
     dplyr::group_by(.row) |>
@@ -505,6 +507,7 @@ cargar_insumos <- function(
   brigadas_cat        <- cargar_brigadas_cat(pool, id_proyecto)
   municipios_cat      <- cargar_municipios_cat(pool)
   usuario_log         <- cargar_usuario_log(pool, id_proyecto)
+  brigada_log         <- cargar_brigada_log(pool, id_proyecto)
   num_map             <- dplyr::tbl(pool, "Usuarios") |>
     dplyr::filter(IdProyecto == !!id_proyecto) |>
     dplyr::select(Id, Num) |>
@@ -522,12 +525,13 @@ cargar_insumos <- function(
   )
 
   estructura_corte <- resolver_estructura_corte(usuario_log, corte, usuarios_asignados, coordinadores_cat$id_supervisor)
+  brigada_corte    <- resolver_coordinador_en_fecha(brigada_log, corte)
 
   bd_aux <- construir_bd_aux(
     estructura_corte,
     usuarios_cat,
     coordinadores_cat,
-    brigadas_cat,
+    brigada_corte,
     municipios_cat
   )
 
@@ -551,11 +555,12 @@ cargar_insumos <- function(
     bd_aux = bd_aux,
     pase_lista = pase_lista,
     cat = list(
-      usuarios = usuarios_cat,
-      brigadas = brigadas_cat,
-      municipios = municipios_cat,
+      usuarios    = usuarios_cat,
+      brigadas    = brigadas_cat,
+      brigada_log = brigada_log,
+      municipios  = municipios_cat,
       usuario_log = usuario_log,
-      num_map = num_map
+      num_map     = num_map
     )
   )
 

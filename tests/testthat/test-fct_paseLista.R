@@ -1,7 +1,7 @@
 # tests/testthat/test-fct_paseLista.R
 
 # =========================================================================
-# HELPER: In-memory DB with the 5 tables used by fct_paseLista
+# HELPER: In-memory DB with the tables used by fct_paseLista
 # =========================================================================
 setup_mock_db_pl <- function() {
   con <- DBI::dbConnect(RSQLite::SQLite(), ":memory:")
@@ -31,6 +31,20 @@ setup_mock_db_pl <- function() {
     IdSupervisor = c(1L, 1L),
     IdBrigada    = c(10L, 10L),
     FechaInsert  = c("2026-03-01", "2026-03-01")
+  ))
+
+  # BrigadasLog: fuente v0.3.0 del coordinador vigente por brigada (LOCF).
+  # Brigada 10 está coordinada por Ana (IdUsuario = 1) al corte.
+  DBI::dbWriteTable(con, "BrigadasLog", tibble::tibble(
+    IdProyecto      = 17L,
+    IdHistorico     = 1L,
+    BrigadaId       = 10L,
+    NombreBrigada   = "Brigada Alpha",
+    IdUsuario       = 1L,
+    IdZonaDeTrabajo = 1L,
+    IdGrupo         = 1L,
+    Activo          = 1L,
+    FechaInsert     = "2026-03-01 00:00:00"
   ))
 
   # Ana (1) is linked to dialogo survey 292

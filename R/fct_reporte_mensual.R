@@ -153,7 +153,7 @@ generar_reporte_brigadas <- function(
         status_vocero = status_coord
       ) |>
       dplyr::arrange(dplyr::desc(nombre_brigada)) |>
-      dplyr::distinct(distrito, nombre_coordinador, .keep_all = TRUE) |>
+      dplyr::distinct(supervisor, .keep_all = TRUE) |>
       dplyr::filter(vocero %in% coord_nums) |>
       dplyr::left_join(df_stats, by = dplyr::join_by(supervisor == usuario_num))
 
@@ -229,6 +229,24 @@ generar_reporte_brigadas <- function(
     na.rm = TRUE
   )
 
+  # Mapa encuesta_id por vocero (1:1 en el caso normal)
+  encuesta_id_map <- bd_completa |>
+    dplyr::filter(fecha >= fecha_inicio_r & fecha <= fecha_fin_r) |>
+    dplyr::summarise(
+      encuesta_id = toString(unique(encuesta_id)),
+      .by = usuario_num
+    )
+
+  voceros_multi_encuesta <- bd_completa |>
+    dplyr::filter(fecha >= fecha_inicio_r & fecha <= fecha_fin_r) |>
+    dplyr::summarise(n = dplyr::n_distinct(encuesta_id), .by = usuario_num) |>
+    dplyr::filter(n > 1)
+  if (nrow(voceros_multi_encuesta) > 0) {
+    cli::cli_alert_warning(
+      "{nrow(voceros_multi_encuesta)} vocero(s) trabajaron en más de un cuestionario: {paste(voceros_multi_encuesta$usuario_num, collapse = ', ')}"
+    )
+  }
+
   reg_final <- procesar_metricas(stats_base, "n")
 
   # 5. Formateo de Tabla Principal (Pivot Wider) ----
@@ -268,6 +286,7 @@ generar_reporte_brigadas <- function(
     ) |>
     dplyr::ungroup() |>
     dplyr::select(-dplyr::any_of("NA")) |>
+    dplyr::left_join(encuesta_id_map, by = dplyr::join_by(vocero == usuario_num)) |>
     dplyr::filter(is.na(status_coord) | status_coord | Total > 0)
 
   # 7. Consolidación Final ----
@@ -312,6 +331,7 @@ generar_reporte_brigadas <- function(
         "status_vocero"
       )
     ) |>
+    dplyr::left_join(encuesta_id_map, by = dplyr::join_by(vocero == usuario_num)) |>
     dplyr::mutate(
       promedio_diario = dplyr::if_else(
         dias_habiles_trabajados > 0,
