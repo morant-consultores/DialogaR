@@ -1074,3 +1074,61 @@ test_that("resolver_brigada_en_fecha: ruta directa devuelve NA cuando usuario si
   expect_equal(nrow(result), 1L)
   expect_true(is.na(result$id_brigada))
 })
+
+# =========================================================================
+# TESTS: excluir_brigadas_prueba
+# =========================================================================
+
+test_that("excluir_brigadas_prueba excluye brigadas de prueba de bd_aux y bd_actividad", {
+  bd_aux <- dplyr::tibble(
+    nombre_brigada = c("06_BRIGADA NORTE", "00_PRUEBAS"),
+    vocero         = c("001", "999"),
+    supervisor     = c("002", NA_character_)
+  )
+  bd_act <- dplyr::tibble(
+    usuario_num = c("001", "999"),
+    desglose    = c("Efectivo", "Efectivo")
+  )
+
+  res <- suppressWarnings(excluir_brigadas_prueba(bd_aux, bd_act))
+
+  expect_equal(nrow(res$bd_aux), 1L)
+  expect_false(any(grepl("prueba", res$bd_aux$nombre_brigada, ignore.case = TRUE)))
+  # La actividad del vocero de la brigada de prueba (999) también se elimina.
+  expect_equal(nrow(res$bd_actividad), 1L)
+  expect_false("999" %in% res$bd_actividad$usuario_num)
+})
+
+test_that("excluir_brigadas_prueba advierte cuando una brigada de prueba tiene diálogos", {
+  bd_aux <- dplyr::tibble(
+    nombre_brigada = "00_PRUEBAS",
+    vocero         = "999",
+    supervisor     = NA_character_
+  )
+  bd_act <- dplyr::tibble(usuario_num = "999", desglose = "Efectivo")
+
+  expect_warning(excluir_brigadas_prueba(bd_aux, bd_act), "prueba")
+})
+
+test_that("excluir_brigadas_prueba no advierte si la brigada de prueba no tiene actividad", {
+  bd_aux <- dplyr::tibble(
+    nombre_brigada = "00_PRUEBAS",
+    vocero         = "999",
+    supervisor     = NA_character_
+  )
+  bd_act <- dplyr::tibble(usuario_num = "001", desglose = "Efectivo")
+
+  expect_no_warning(res <- excluir_brigadas_prueba(bd_aux, bd_act))
+  expect_equal(nrow(res$bd_aux), 0L)
+  expect_equal(nrow(res$bd_actividad), 1L)  # actividad ajena intacta
+})
+
+test_that("excluir_brigadas_prueba sin coincidencias devuelve insumos intactos", {
+  bd_aux <- dplyr::tibble(nombre_brigada = "06_BRIGADA NORTE", vocero = "001", supervisor = "002")
+  bd_act <- dplyr::tibble(usuario_num = "001", desglose = "Efectivo")
+
+  res <- excluir_brigadas_prueba(bd_aux, bd_act)
+
+  expect_equal(nrow(res$bd_aux), 1L)
+  expect_equal(nrow(res$bd_actividad), 1L)
+})
