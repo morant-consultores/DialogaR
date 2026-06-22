@@ -15,7 +15,9 @@ cargar_insumos(
   filtro_minimo_actividad = NULL,
   normalizador_actividad = NULL,
   postprocess_insumos = NULL,
-  cargo_coordinador = "Coordinador de Brigada"
+  cargo_coordinador = "Coordinador de Brigada",
+  excluir_pruebas = TRUE,
+  patron_pruebas = "prueba"
 )
 }
 \arguments{
@@ -43,6 +45,14 @@ cargar_insumos(
 \code{Usuarios} que identifica a los coordinadores de brigada. Varía por proyecto
 (ej. \code{"Coordinador de Brigada"}, \code{"Coordinador"}, \code{"Supervisor"}).
 Por defecto \code{"Coordinador de Brigada"}.}
+
+\item{excluir_pruebas}{Logical. Si \code{TRUE} (por defecto), excluye de \code{bd_aux} y
+\code{bd_actividad} las brigadas cuyo nombre coincide con \code{patron_pruebas}, de modo
+que no aparezcan en ningún reporte. Si alguna brigada de prueba tiene actividad
+(diálogos) registrada, se emite una advertencia clara antes de excluirla.}
+
+\item{patron_pruebas}{Character. Expresión regular (case-insensitive) para
+identificar brigadas de prueba por \code{nombre_brigada}. Por defecto \code{"prueba"}.}
 }
 \value{
 Una lista estructurada (\code{insumos}) con los dataframes listos para reporteo.

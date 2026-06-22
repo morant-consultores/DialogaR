@@ -501,6 +501,69 @@ resolver_brigada_en_fecha <- function(actividad, usuario_log, usuarios_cat, num_
     dplyr::select(-.row, -fecha_evento)
 }
 
+# Excluir brigadas de prueba de los insumos compartidos (bd_aux y bd_actividad),
+# de modo que no aparezcan en ningún reporte. Si una brigada de prueba tiene
+# actividad registrada (diálogos), se emite una advertencia clara antes de
+# excluirla — registrar diálogos contra una brigada de prueba es un error de
+# captura que no debe pasar inadvertido.
+excluir_brigadas_prueba <- function(bd_aux, bd_actividad, patron = "prueba") {
+  if (is.null(bd_aux) || !"nombre_brigada" %in% names(bd_aux)) {
+    return(list(bd_aux = bd_aux, bd_actividad = bd_actividad))
+  }
+
+  es_prueba <- grepl(patron, bd_aux$nombre_brigada, ignore.case = TRUE)
+  es_prueba[is.na(es_prueba)] <- FALSE
+  if (!any(es_prueba)) {
+    return(list(bd_aux = bd_aux, bd_actividad = bd_actividad))
+  }
+
+  brig_prueba <- bd_aux[es_prueba, , drop = FALSE]
+  num_brigada <- dplyr::bind_rows(
+    dplyr::transmute(brig_prueba, usuario_num = vocero, nombre_brigada),
+    dplyr::transmute(brig_prueba, usuario_num = supervisor, nombre_brigada)
+  ) |>
+    dplyr::filter(!is.na(usuario_num), usuario_num != "-") |>
+    dplyr::distinct(usuario_num, .keep_all = TRUE)
+
+  # Flag: actividad (diálogos) registrada contra brigadas de prueba.
+  if (!is.null(bd_actividad) && "usuario_num" %in% names(bd_actividad)) {
+    act_prueba <- bd_actividad |>
+      dplyr::inner_join(num_brigada, by = "usuario_num")
+
+    if (nrow(act_prueba) > 0) {
+      tiene_desglose <- "desglose" %in% names(act_prueba)
+      resumen <- act_prueba |>
+        dplyr::group_by(nombre_brigada) |>
+        dplyr::summarise(
+          registros = dplyr::n(),
+          dialogos  = if (tiene_desglose) sum(desglose == "Efectivo", na.rm = TRUE) else NA_integer_,
+          .groups   = "drop"
+        )
+      lineas <- resumen |>
+        dplyr::transmute(msg = sprintf(
+          "Brigada '%s': %d registro(s) de actividad%s — EXCLUIDA de los reportes",
+          nombre_brigada, registros,
+          if (tiene_desglose) sprintf(", %d diálogo(s) efectivo(s)", dialogos) else ""
+        )) |>
+        dplyr::pull(msg)
+
+      cli::cli_warn(c(
+        "!" = sprintf(
+          "%d brigada(s) de prueba con actividad registrada fueron excluidas de los reportes.",
+          nrow(resumen)
+        ),
+        " " = "Revisar por qué se registraron diálogos contra una brigada de prueba.",
+        stats::setNames(lineas, rep("*", length(lineas)))
+      ))
+    }
+
+    bd_actividad <- bd_actividad |>
+      dplyr::anti_join(num_brigada, by = "usuario_num")
+  }
+
+  list(bd_aux = bd_aux[!es_prueba, , drop = FALSE], bd_actividad = bd_actividad)
+}
+
 # ---- 3) Orquestador Principal (Exportado) -------------------------------
 
 #' Cargar Insumos Operativos (ETL Central)
@@ -524,6 +587,12 @@ resolver_brigada_en_fecha <- function(actividad, usuario_log, usuarios_cat, num_
 #'   `Usuarios` que identifica a los coordinadores de brigada. Varía por proyecto
 #'   (ej. `"Coordinador de Brigada"`, `"Coordinador"`, `"Supervisor"`).
 #'   Por defecto `"Coordinador de Brigada"`.
+#' @param excluir_pruebas Logical. Si `TRUE` (por defecto), excluye de `bd_aux` y
+#'   `bd_actividad` las brigadas cuyo nombre coincide con `patron_pruebas`, de modo
+#'   que no aparezcan en ningún reporte. Si alguna brigada de prueba tiene actividad
+#'   (diálogos) registrada, se emite una advertencia clara antes de excluirla.
+#' @param patron_pruebas Character. Expresión regular (case-insensitive) para
+#'   identificar brigadas de prueba por `nombre_brigada`. Por defecto `"prueba"`.
 #'
 #' @return Una lista estructurada (`insumos`) con los dataframes listos para reporteo.
 #' @importFrom lubridate as_datetime with_tz as_date
@@ -539,7 +608,9 @@ cargar_insumos <- function(
   filtro_minimo_actividad = NULL,
   normalizador_actividad = NULL,
   postprocess_insumos = NULL,
-  cargo_coordinador = "Coordinador de Brigada"
+  cargo_coordinador = "Coordinador de Brigada",
+  excluir_pruebas = TRUE,
+  patron_pruebas = "prueba"
 ) {
   usuarios_asignados  <- cargar_usuarios_asignados(pool, fuentes_actividad)
   usuarios_cat        <- cargar_usuarios_cat(pool, id_proyecto, usuarios_asignados, cargo_coordinador)
@@ -613,6 +684,17 @@ cargar_insumos <- function(
   # Ejecutar el Hook de inyección de reglas de negocio
   if (!is.null(postprocess_insumos)) {
     insumos <- postprocess_insumos(insumos)
+  }
+
+  # Excluir brigadas de prueba al final, respetando lo que haya hecho el hook.
+  if (isTRUE(excluir_pruebas)) {
+    limpio <- excluir_brigadas_prueba(
+      insumos$bd_aux,
+      insumos$bd_actividad,
+      patron = patron_pruebas
+    )
+    insumos$bd_aux       <- limpio$bd_aux
+    insumos$bd_actividad <- limpio$bd_actividad
   }
 
   return(insumos)
