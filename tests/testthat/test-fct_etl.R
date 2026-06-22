@@ -1075,6 +1075,22 @@ test_that("resolver_brigada_en_fecha: ruta directa devuelve NA cuando usuario si
   expect_true(is.na(result$id_brigada))
 })
 
+test_that("resolver_brigada_en_fecha: un solo NA en id_usuario_actividad avisa y cae a ruta legacy", {
+  # La columna existe pero está parcialmente poblada: debe usar usuario_num
+  # para TODAS las filas y emitir una advertencia con el conteo de NAs.
+  actividad <- dplyr::tibble(
+    usuario_num          = c("1", "2"),
+    fecha                = as.Date(c("2026-02-01", "2026-02-01")),
+    id_usuario_actividad = c(1L, NA_integer_)
+  )
+
+  expect_warning(
+    result <- resolver_brigada_en_fecha(actividad, make_usuario_log(), make_usuarios_cat()),
+    "1 de 2"
+  )
+  expect_equal(nrow(result), 2L)
+})
+
 # =========================================================================
 # TESTS: excluir_brigadas_prueba
 # =========================================================================

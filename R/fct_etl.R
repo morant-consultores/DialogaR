@@ -455,8 +455,18 @@ resolver_brigada_en_fecha <- function(actividad, usuario_log, usuarios_cat, num_
   # Ruta directa: actividad tiene id_usuario_actividad (FK int a Usuarios.Id)
   # Requiere ALL no-NA para garantizar que no haya rows sin resolver (hasta que
   # el snapshot tenga UsuarioId completo con backpropagación)
-  tiene_id_usuario <- "id_usuario_actividad" %in% names(actividad) &&
-    all(!is.na(actividad$id_usuario_actividad))
+  hay_col_id      <- "id_usuario_actividad" %in% names(actividad)
+  n_id_na         <- if (hay_col_id) sum(is.na(actividad$id_usuario_actividad)) else 0L
+  tiene_id_usuario <- hay_col_id && n_id_na == 0L
+
+  # La caída a la ruta legacy por NAs es global (un solo NA la dispara): hacerla
+  # observable para no diagnosticar a ciegas un snapshot parcialmente poblado.
+  if (hay_col_id && !tiene_id_usuario) {
+    cli::cli_warn(c(
+      "!" = "resolver_brigada_en_fecha: {n_id_na} de {nrow(actividad)} fila(s) sin {.field id_usuario_actividad}.",
+      "i" = "Se usa la ruta legacy por {.field usuario_num} para TODAS las filas."
+    ))
+  }
 
   if (tiene_id_usuario) {
     return(
