@@ -12,6 +12,9 @@
 # - Escapa el JSON con glue::glue_sql() para evitar inyección y corrupción
 #   por comillas internas. No usa binding de parámetros TDS porque FreeTDS
 #   trunca NVARCHAR(MAX) grandes al cruzar el protocolo de parámetros.
+# - NO aplicar gsub("'","''") manualmente a los campos visibleIf: glue_sql()
+#   ya maneja el escape SQL vía DBI::dbQuoteString(). El escape manual previo
+#   causaba doble-escapado que rompía la lógica de visibilidad en SurveyJS.
 # -------------------------------------------------------------------------
 
 # ---- Helpers Internos (No exportados) -----------------------------------
@@ -131,8 +134,7 @@ generar_paginas_dinamicas <- function(base_operativa, pagina_cero) {
       elementos <- pagina_cero$elements |>
         purrr::pluck(1) |>
         dplyr::mutate(
-          dplyr::across(c(name, title, visibleIf), ~ gsub("0", vocero, .x)),
-          visibleIf = gsub("'", "''", visibleIf)
+          dplyr::across(c(name, title, visibleIf), ~ gsub("0", vocero, .x))
         ) |>
         dplyr::as_tibble()
 
@@ -178,19 +180,10 @@ ensamblar_json_final <- function(
       ~ {
         tabla <- .x$elements |> purrr::pluck(1) |> dplyr::as_tibble()
         if ("visibleIf" %in% names(tabla)) {
-          elements <- tabla |>
-            dplyr::mutate(visibleIf = gsub("'", "''", visibleIf))
+          elements <- tabla
         } else {
           tabla <- tabla |> dplyr::mutate(choices = list(relacion))
-          choices <- tabla |>
-            dplyr::pull(choices) |>
-            purrr::map(
-              ~ if ("visibleIf" %in% names(.x)) {
-                dplyr::mutate(.x, visibleIf = gsub("'", "''", visibleIf))
-              } else {
-                .x
-              }
-            )
+          choices <- tabla |> dplyr::pull(choices)
           elements <- .x$elements |>
             purrr::pluck(1) |>
             dplyr::as_tibble() |>
