@@ -9,7 +9,9 @@
 # -------------------------------------------------------------------------
 # NOTAS DE SEGURIDAD:
 # - Esta función modifica directamente el esquema del instrumento en la BD.
-# - Utiliza consultas parametrizadas para evitar inyección SQL y corrupción del JSON.
+# - Escapa el JSON con glue::glue_sql() para evitar inyección y corrupción
+#   por comillas internas. No usa binding de parámetros TDS porque FreeTDS
+#   trunca NVARCHAR(MAX) grandes al cruzar el protocolo de parámetros.
 # -------------------------------------------------------------------------
 
 # ---- Helpers Internos (No exportados) -----------------------------------
@@ -296,20 +298,27 @@ actualizar_pase_lista <- function(
     base_operativa = base_operativa
   )
 
-  # 6. Persistencia (Método GLUE probado en FreeTDS)
-  version_actual <- dplyr::tbl(pool, "Encuesta") |>
-    dplyr::filter(Id == !!id_pase_lista) |>
-    dplyr::pull(Version) |>
-    (\(v) if (length(v) == 0 || is.na(v)) 0L else as.integer(v))()
+  # 6. Validación y persistencia
+  if (!jsonlite::validate(json_actualizado)) {
+    cli::cli_abort(c(
+      "JSON ensamblado inválido para el cuestionario {id_pase_lista}.",
+      "i" = "Backup intacto en: {archivo_backup}",
+      "i" = "No se ejecutó UPDATE."
+    ))
+  }
 
   fecha_mod <- as.character(lubridate::now(tzone = 'America/Mexico_City'))
 
-  query_update <- glue::glue(
-    "UPDATE Encuesta 
-     SET JsonData = '{json_actualizado}', 
-         Version = {version_actual + 1}, 
-         FechaModificacion = '{fecha_mod}' 
-     WHERE Id = {id_pase_lista};"
+  # glue_sql escapa comillas internas correctamente. El incremento de Version
+  # se hace en el servidor (COALESCE es ANSI: válido en SQL Server y SQLite)
+  # para evitar la condición de carrera del patrón read-modify-write.
+  query_update <- glue::glue_sql(
+    "UPDATE Encuesta
+        SET JsonData = {json_actualizado},
+            Version = COALESCE(Version, 0) + 1,
+            FechaModificacion = {fecha_mod}
+      WHERE Id = {id_pase_lista}",
+    .con = pool
   )
 
   DBI::dbExecute(pool, query_update)
