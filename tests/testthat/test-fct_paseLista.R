@@ -192,13 +192,10 @@ test_that("actualizar_pase_lista trata Version = NULL como 0 y escribe Version =
   testthat::local_mocked_bindings(
     construir_base_operativa_pl = function(...) {
       tibble::tibble(
-        IdSupervisor     = 1L,  IdUsuario = 2L,    IdBrigada = 10L,
-        NombreBrigada    = "Alpha",
-        nombre_coordinador = "ANA GARCIA X",      supervisor = "S01",
-        status_supervisor  = 1L,
-        nombre_vocero    = "LUIS PEREZ Y",         vocero = "V01",
-        status_vocero    = 1L,
-        IdCargoSupervisor = 37L,                   IdCargoVocero = 99L
+        IdUsuario = 2L, IdBrigada = 10L,
+        nombre_vocero = "LUIS PEREZ Y", vocero = "V01", status_vocero = 1L,
+        id_coordinador_log = 1L, nombre_coordinador = "ANA GARCIA X",
+        supervisor = "S01", status_supervisor = 1L
       )
     },
     extraer_json_molde = function(...) {
@@ -251,11 +248,10 @@ test_that("actualizar_pase_lista incrementa una Version existente correctamente"
   testthat::local_mocked_bindings(
     construir_base_operativa_pl = function(...) {
       tibble::tibble(
-        IdSupervisor = 1L, IdUsuario = 2L, IdBrigada = 10L,
-        NombreBrigada = "Alpha", nombre_coordinador = "ANA GARCIA X",
-        supervisor = "S01", status_supervisor = 1L,
-        nombre_vocero = "LUIS PEREZ Y", vocero = "V01",
-        status_vocero = 1L, IdCargoSupervisor = 37L, IdCargoVocero = 99L
+        IdUsuario = 2L, IdBrigada = 10L,
+        nombre_vocero = "LUIS PEREZ Y", vocero = "V01", status_vocero = 1L,
+        id_coordinador_log = 1L, nombre_coordinador = "ANA GARCIA X",
+        supervisor = "S01", status_supervisor = 1L
       )
     },
     extraer_json_molde = function(...) {
@@ -308,11 +304,10 @@ test_that("actualizar_pase_lista preserva comillas simples internas y neutraliza
   testthat::local_mocked_bindings(
     construir_base_operativa_pl = function(...) {
       tibble::tibble(
-        IdSupervisor = 1L, IdUsuario = 2L, IdBrigada = 10L,
-        NombreBrigada = "Alpha", nombre_coordinador = "ANA GARCIA X",
-        supervisor = "S01", status_supervisor = 1L,
-        nombre_vocero = "LUIS PEREZ Y", vocero = "V01",
-        status_vocero = 1L, IdCargoSupervisor = 37L, IdCargoVocero = 99L
+        IdUsuario = 2L, IdBrigada = 10L,
+        nombre_vocero = "LUIS PEREZ Y", vocero = "V01", status_vocero = 1L,
+        id_coordinador_log = 1L, nombre_coordinador = "ANA GARCIA X",
+        supervisor = "S01", status_supervisor = 1L
       )
     },
     extraer_json_molde = function(...) {
@@ -366,11 +361,10 @@ test_that("actualizar_pase_lista aborta sin ejecutar UPDATE cuando el JSON es in
   testthat::local_mocked_bindings(
     construir_base_operativa_pl = function(...) {
       tibble::tibble(
-        IdSupervisor = 1L, IdUsuario = 2L, IdBrigada = 10L,
-        NombreBrigada = "Alpha", nombre_coordinador = "ANA GARCIA X",
-        supervisor = "S01", status_supervisor = 1L,
-        nombre_vocero = "LUIS PEREZ Y", vocero = "V01",
-        status_vocero = 1L, IdCargoSupervisor = 37L, IdCargoVocero = 99L
+        IdUsuario = 2L, IdBrigada = 10L,
+        nombre_vocero = "LUIS PEREZ Y", vocero = "V01", status_vocero = 1L,
+        id_coordinador_log = 1L, nombre_coordinador = "ANA GARCIA X",
+        supervisor = "S01", status_supervisor = 1L
       )
     },
     extraer_json_molde = function(...) {
