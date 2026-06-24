@@ -1,6 +1,6 @@
 Package: DialogaR
 Title: ETL, Aggregation and Reporting for Diálogo Social
-Version: 0.3.0
+Version: 0.3.2
 Authors@R: 
     person("Rafael", "Lopez", , "rlopez@morant.com.mx", role = c("aut", "cre"))
 Description: Data processing and reporting engine for Diálogo Social field

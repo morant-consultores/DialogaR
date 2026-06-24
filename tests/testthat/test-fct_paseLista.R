@@ -28,6 +28,20 @@ setup_mock_db_pl <- function() {
     IdUsuario     = 1L   # Ana (Id=1) lidera la brigada 10
   ))
 
+  # BrigadasLog: fuente v0.3.0 del coordinador vigente por brigada (LOCF).
+  # Brigada 10 está coordinada por Ana (IdUsuario = 1) al corte.
+  DBI::dbWriteTable(con, "BrigadasLog", tibble::tibble(
+    IdProyecto      = 17L,
+    IdHistorico     = 1L,
+    BrigadaId       = 10L,
+    NombreBrigada   = "Brigada Alpha",
+    IdUsuario       = 1L,
+    IdZonaDeTrabajo = 1L,
+    IdGrupo         = 1L,
+    Activo          = 1L,
+    FechaInsert     = "2026-03-01 00:00:00"
+  ))
+
   # Ana (1) is linked to dialogo survey 292
   DBI::dbWriteTable(con, "UsuariosEncuesta", tibble::tibble(
     UsuarioId  = 1L,
