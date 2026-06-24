@@ -7,15 +7,17 @@ setup_mock_db_pl <- function() {
   con <- DBI::dbConnect(RSQLite::SQLite(), ":memory:")
 
   # Usuarios: 1 supervisor (IdCargo=37), 1 active vocero, 1 inactive vocero
+  # IdBrigada: voceros asignados directamente; coordinador sin brigada propia.
   DBI::dbWriteTable(con, "Usuarios", tibble::tibble(
-    Id        = c(1L, 2L, 3L),
+    Id         = c(1L,  2L,  3L),
     IdProyecto = c(17L, 17L, 17L),
     Num        = c("S01", "V01", "V02"),
     Nombre     = c("Ana", "Luis", "Marta"),
     APaterno   = c("Garcia", "Perez", "Lopez"),
     AMaterno   = c("X", "Y", "Z"),
-    Status     = c(1L, 1L, 0L),   # SQLite integers; 0 = inactive
-    IdCargo    = c(37L, 99L, 99L)
+    Status     = c(1L, 1L, 0L),     # SQLite integers; 0 = inactive
+    IdCargo    = c(37L, 99L, 99L),
+    IdBrigada  = c(NA_integer_, 10L, 10L)  # coordinator has no brigade row
   ))
 
   DBI::dbWriteTable(con, "Brigadas", tibble::tibble(
@@ -24,7 +26,8 @@ setup_mock_db_pl <- function() {
     NombreBrigada = "Brigada Alpha"
   ))
 
-  # Luis (2) and Marta (3) are both subordinates of Ana (1)
+  # UsuarioLog kept for other consumers; construir_base_operativa_pl now uses
+  # Usuarios.IdBrigada directly instead.
   DBI::dbWriteTable(con, "UsuarioLog", tibble::tibble(
     IdProyecto   = c(17L, 17L),
     IdUsuario    = c(2L, 3L),

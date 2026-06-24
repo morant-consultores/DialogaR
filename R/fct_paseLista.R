@@ -21,9 +21,11 @@
 
 # 1. Construir la base operativa (Extrae y cruza la jerarquía)
 #
-# v0.3.0: reemplaza la ruta UsuarioLog→IdSupervisor (que produce NA cuando
-# la plataforma deja de registrar ese campo) por la cadena:
-#   UsuarioLog (LOCF IdBrigada) → BrigadasLog (LOCF IdUsuario) → Usuarios
+# v0.3.1: usa Usuarios.IdBrigada (estado actual de la operación) en lugar de
+# UsuarioLog LOCF para la relación vocero→brigada. El coordinador vigente por
+# brigada sigue resolviendo via BrigadasLog LOCF al corte.
+# Los coordinadores se excluyen de la lista de voceros (base_aux) y sólo
+# aparecen como página propia cuando tienen el cuestionario de diálogos asignado.
 construir_base_operativa_pl <- function(
   pool,
   id_proyecto,
@@ -35,19 +37,7 @@ construir_base_operativa_pl <- function(
     dplyr::filter(IdProyecto == !!id_proyecto) |>
     dplyr::collect()
   usuarios_encuesta <- dplyr::tbl(pool, "UsuariosEncuesta") |> dplyr::collect()
-  usuario_log <- dplyr::tbl(pool, "UsuarioLog") |>
-    dplyr::filter(IdProyecto == !!id_proyecto) |>
-    dplyr::collect()
   brigada_log <- cargar_brigada_log(pool, id_proyecto)
-
-  # Brigada vigente por vocero: LOCF sobre IdBrigada en UsuarioLog
-  estructura <- usuario_log |>
-    dplyr::arrange(IdUsuario, FechaInsert) |>
-    dplyr::group_by(IdUsuario) |>
-    tidyr::fill(IdBrigada, .direction = "down") |>
-    dplyr::slice_tail(n = 1) |>
-    dplyr::ungroup() |>
-    dplyr::select(IdUsuario, IdBrigada)
 
   # Coordinador vigente por brigada al corte: LOCF sobre BrigadasLog
   brigada_corte <- resolver_coordinador_en_fecha(brigada_log, corte)
@@ -62,19 +52,19 @@ construir_base_operativa_pl <- function(
       status_supervisor  = Status
     )
 
-  # Voceros → brigada → coordinador
-  base_aux <- estructura |>
-    dplyr::inner_join(
-      usuarios |>
-        dplyr::transmute(
-          Id,
-          nombre_vocero = paste(Nombre, APaterno, AMaterno),
-          vocero        = Num,
-          status_vocero = Status
-        ),
-      by = dplyr::join_by(IdUsuario == Id)
+  # Voceros activos con brigada asignada en Usuarios (estado actual).
+  # Coordinadores excluidos: su página propia se genera vía coordinadores_voceros.
+  coord_ids <- cat_coord |> dplyr::pull(Id)
+
+  base_aux <- usuarios |>
+    dplyr::filter(!is.na(IdBrigada), as.logical(Status), !Id %in% coord_ids) |>
+    dplyr::transmute(
+      IdUsuario     = Id,
+      IdBrigada,
+      nombre_vocero = paste(Nombre, APaterno, AMaterno),
+      vocero        = Num,
+      status_vocero = Status
     ) |>
-    dplyr::filter(as.logical(status_vocero), !is.na(IdBrigada)) |>
     dplyr::left_join(
       brigada_corte |> dplyr::select(id_brigada, id_coordinador_log),
       by = dplyr::join_by(IdBrigada == id_brigada)
@@ -89,7 +79,8 @@ construir_base_operativa_pl <- function(
       ~ gsub("  ", " ", stringr::str_to_upper(stringr::str_squish(.x)))
     ))
 
-  # Coordinadores como filas propias (para el dropdown del cuestionario)
+  # Coordinadores como filas propias: sólo los que tienen el cuestionario
+  # de diálogos asignado (coordinadores que también realizan diálogos).
   coordinadores_voceros <- base_aux |>
     dplyr::distinct(id_coordinador_log, .keep_all = TRUE) |>
     dplyr::filter(status_supervisor == TRUE) |>
