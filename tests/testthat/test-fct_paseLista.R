@@ -20,34 +20,12 @@ setup_mock_db_pl <- function() {
     IdBrigada  = c(NA_integer_, 10L, 10L)  # coordinator has no brigade row
   ))
 
+  # Brigadas: coordinador actual via IdUsuario (estado canónico, sin LOCF)
   DBI::dbWriteTable(con, "Brigadas", tibble::tibble(
     Id            = 10L,
     IdProyecto    = 17L,
-    NombreBrigada = "Brigada Alpha"
-  ))
-
-  # UsuarioLog kept for other consumers; construir_base_operativa_pl now uses
-  # Usuarios.IdBrigada directly instead.
-  DBI::dbWriteTable(con, "UsuarioLog", tibble::tibble(
-    IdProyecto   = c(17L, 17L),
-    IdUsuario    = c(2L, 3L),
-    IdSupervisor = c(1L, 1L),
-    IdBrigada    = c(10L, 10L),
-    FechaInsert  = c("2026-03-01", "2026-03-01")
-  ))
-
-  # BrigadasLog: fuente v0.3.0 del coordinador vigente por brigada (LOCF).
-  # Brigada 10 está coordinada por Ana (IdUsuario = 1) al corte.
-  DBI::dbWriteTable(con, "BrigadasLog", tibble::tibble(
-    IdProyecto      = 17L,
-    IdHistorico     = 1L,
-    BrigadaId       = 10L,
-    NombreBrigada   = "Brigada Alpha",
-    IdUsuario       = 1L,
-    IdZonaDeTrabajo = 1L,
-    IdGrupo         = 1L,
-    Activo          = 1L,
-    FechaInsert     = "2026-03-01 00:00:00"
+    NombreBrigada = "Brigada Alpha",
+    IdUsuario     = 1L   # Ana (Id=1) lidera la brigada 10
   ))
 
   # Ana (1) is linked to dialogo survey 292

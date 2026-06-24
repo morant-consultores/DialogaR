@@ -21,9 +21,10 @@
 
 # 1. Construir la base operativa (Extrae y cruza la jerarquía)
 #
-# v0.3.1: usa Usuarios.IdBrigada (estado actual de la operación) en lugar de
-# UsuarioLog LOCF para la relación vocero→brigada. El coordinador vigente por
-# brigada sigue resolviendo via BrigadasLog LOCF al corte.
+# v0.3.1: usa el estado actual de las tablas Usuarios y Brigadas en lugar de
+# UsuarioLog/BrigadasLog con LOCF histórico.
+#   Vocero → brigada : Usuarios.IdBrigada (asignación actual)
+#   Brigada → coordinador : Brigadas.IdUsuario (coordinador actual)
 # Los coordinadores se excluyen de la lista de voceros (base_aux) y sólo
 # aparecen como página propia cuando tienen el cuestionario de diálogos asignado.
 construir_base_operativa_pl <- function(
@@ -31,16 +32,19 @@ construir_base_operativa_pl <- function(
   id_proyecto,
   ids_encuestas_dialogo,
   id_cargo_supervisor,
-  corte = Sys.Date()
+  corte = Sys.Date()   # reservado; ya no se usa para la jerarquía actual
 ) {
   usuarios <- dplyr::tbl(pool, "Usuarios") |>
     dplyr::filter(IdProyecto == !!id_proyecto) |>
     dplyr::collect()
   usuarios_encuesta <- dplyr::tbl(pool, "UsuariosEncuesta") |> dplyr::collect()
-  brigada_log <- cargar_brigada_log(pool, id_proyecto)
 
-  # Coordinador vigente por brigada al corte: LOCF sobre BrigadasLog
-  brigada_corte <- resolver_coordinador_en_fecha(brigada_log, corte)
+  # Coordinador actual por brigada: Brigadas.IdUsuario (estado canónico)
+  brigadas_coord <- dplyr::tbl(pool, "Brigadas") |>
+    dplyr::filter(IdProyecto == !!id_proyecto) |>
+    dplyr::select(Id, IdUsuario) |>
+    dplyr::collect() |>
+    dplyr::rename(id_brigada = Id, id_coordinador_log = IdUsuario)
 
   # Catálogo de coordinadores válidos (cargo correcto)
   cat_coord <- usuarios |>
@@ -65,14 +69,8 @@ construir_base_operativa_pl <- function(
       vocero        = Num,
       status_vocero = Status
     ) |>
-    dplyr::left_join(
-      brigada_corte |> dplyr::select(id_brigada, id_coordinador_log),
-      by = dplyr::join_by(IdBrigada == id_brigada)
-    ) |>
-    dplyr::left_join(
-      cat_coord,
-      by = dplyr::join_by(id_coordinador_log == Id)
-    ) |>
+    dplyr::left_join(brigadas_coord, by = dplyr::join_by(IdBrigada == id_brigada)) |>
+    dplyr::left_join(cat_coord,      by = dplyr::join_by(id_coordinador_log == Id)) |>
     dplyr::filter(!is.na(nombre_coordinador)) |>
     dplyr::mutate(dplyr::across(
       dplyr::contains("nombre"),
