@@ -7,30 +7,25 @@ setup_mock_db_pl <- function() {
   con <- DBI::dbConnect(RSQLite::SQLite(), ":memory:")
 
   # Usuarios: 1 supervisor (IdCargo=37), 1 active vocero, 1 inactive vocero
+  # IdBrigada: voceros asignados directamente; coordinador sin brigada propia.
   DBI::dbWriteTable(con, "Usuarios", tibble::tibble(
-    Id        = c(1L, 2L, 3L),
+    Id         = c(1L,  2L,  3L),
     IdProyecto = c(17L, 17L, 17L),
     Num        = c("S01", "V01", "V02"),
     Nombre     = c("Ana", "Luis", "Marta"),
     APaterno   = c("Garcia", "Perez", "Lopez"),
     AMaterno   = c("X", "Y", "Z"),
-    Status     = c(1L, 1L, 0L),   # SQLite integers; 0 = inactive
-    IdCargo    = c(37L, 99L, 99L)
+    Status     = c(1L, 1L, 0L),     # SQLite integers; 0 = inactive
+    IdCargo    = c(37L, 99L, 99L),
+    IdBrigada  = c(NA_integer_, 10L, 10L)  # coordinator has no brigade row
   ))
 
+  # Brigadas: coordinador actual via IdUsuario (estado canónico, sin LOCF)
   DBI::dbWriteTable(con, "Brigadas", tibble::tibble(
     Id            = 10L,
     IdProyecto    = 17L,
-    NombreBrigada = "Brigada Alpha"
-  ))
-
-  # Luis (2) and Marta (3) are both subordinates of Ana (1)
-  DBI::dbWriteTable(con, "UsuarioLog", tibble::tibble(
-    IdProyecto   = c(17L, 17L),
-    IdUsuario    = c(2L, 3L),
-    IdSupervisor = c(1L, 1L),
-    IdBrigada    = c(10L, 10L),
-    FechaInsert  = c("2026-03-01", "2026-03-01")
+    NombreBrigada = "Brigada Alpha",
+    IdUsuario     = 1L   # Ana (Id=1) lidera la brigada 10
   ))
 
   # BrigadasLog: fuente v0.3.0 del coordinador vigente por brigada (LOCF).
@@ -149,6 +144,37 @@ test_that("construir_base_operativa_pl excluye coordinador no asignado a encuest
   # Solo Luis queda; Ana no aparece como coordinador-vocero
   expect_equal(nrow(resultado), 1)
   expect_false("S01" %in% resultado$vocero)
+})
+
+# =========================================================================
+# TESTS: generar_paginas_dinamicas (escape de visibleIf)
+# =========================================================================
+
+test_that("generar_paginas_dinamicas usa comillas simples en el visibleIf de pagina", {
+  # Regresion: un '' hardcodeado en la plantilla, sumado al escape de glue_sql()
+  # en actualizar_pase_lista(), producia {Obtener_usuario} = ''NUM'' en la BD.
+  # SurveyJS no puede evaluar esa expresion, por lo que mostraba TODAS las
+  # paginas de voceros para cualquier coordinador (sin jerarquia efectiva).
+  pagina_cero <- tibble::tibble(
+    name = "0",
+    elements = list(tibble::tibble(
+      type = "radiogroup", name = "asistencia_0",
+      title = "Asistencia 0", visibleIf = "{Obtener_usuario} = '0'"
+    ))
+  )
+  base_op <- tibble::tibble(
+    IdUsuario = 12061L, IdBrigada = 86L,
+    nombre_vocero = "CARLOS STEAVEN", vocero = "6623551685",
+    status_vocero = TRUE, id_coordinador_log = 11763L,
+    nombre_coordinador = "LAURA GARCIA", supervisor = "6621381188",
+    status_supervisor = TRUE
+  )
+
+  pagina <- DialogaR:::generar_paginas_dinamicas(base_op, pagina_cero)[[1]]
+  visibleIf <- jsonlite::fromJSON(paste0("[", pagina, "]"))$visibleIf
+
+  expect_equal(visibleIf, "{Obtener_usuario} = '6621381188'")
+  expect_false(grepl("''", visibleIf))  # nunca comillas dobles
 })
 
 # =========================================================================

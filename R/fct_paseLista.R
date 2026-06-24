@@ -21,36 +21,30 @@
 
 # 1. Construir la base operativa (Extrae y cruza la jerarquía)
 #
-# v0.3.0: reemplaza la ruta UsuarioLog→IdSupervisor (que produce NA cuando
-# la plataforma deja de registrar ese campo) por la cadena:
-#   UsuarioLog (LOCF IdBrigada) → BrigadasLog (LOCF IdUsuario) → Usuarios
+# v0.3.1: usa el estado actual de las tablas Usuarios y Brigadas en lugar de
+# UsuarioLog/BrigadasLog con LOCF histórico.
+#   Vocero → brigada : Usuarios.IdBrigada (asignación actual)
+#   Brigada → coordinador : Brigadas.IdUsuario (coordinador actual)
+# Los coordinadores se excluyen de la lista de voceros (base_aux) y sólo
+# aparecen como página propia cuando tienen el cuestionario de diálogos asignado.
 construir_base_operativa_pl <- function(
   pool,
   id_proyecto,
   ids_encuestas_dialogo,
   id_cargo_supervisor,
-  corte = Sys.Date()
+  corte = Sys.Date()   # reservado; ya no se usa para la jerarquía actual
 ) {
   usuarios <- dplyr::tbl(pool, "Usuarios") |>
     dplyr::filter(IdProyecto == !!id_proyecto) |>
     dplyr::collect()
   usuarios_encuesta <- dplyr::tbl(pool, "UsuariosEncuesta") |> dplyr::collect()
-  usuario_log <- dplyr::tbl(pool, "UsuarioLog") |>
+
+  # Coordinador actual por brigada: Brigadas.IdUsuario (estado canónico)
+  brigadas_coord <- dplyr::tbl(pool, "Brigadas") |>
     dplyr::filter(IdProyecto == !!id_proyecto) |>
-    dplyr::collect()
-  brigada_log <- cargar_brigada_log(pool, id_proyecto)
-
-  # Brigada vigente por vocero: LOCF sobre IdBrigada en UsuarioLog
-  estructura <- usuario_log |>
-    dplyr::arrange(IdUsuario, FechaInsert) |>
-    dplyr::group_by(IdUsuario) |>
-    tidyr::fill(IdBrigada, .direction = "down") |>
-    dplyr::slice_tail(n = 1) |>
-    dplyr::ungroup() |>
-    dplyr::select(IdUsuario, IdBrigada)
-
-  # Coordinador vigente por brigada al corte: LOCF sobre BrigadasLog
-  brigada_corte <- resolver_coordinador_en_fecha(brigada_log, corte)
+    dplyr::select(Id, IdUsuario) |>
+    dplyr::collect() |>
+    dplyr::rename(id_brigada = Id, id_coordinador_log = IdUsuario)
 
   # Catálogo de coordinadores válidos (cargo correcto)
   cat_coord <- usuarios |>
@@ -62,34 +56,29 @@ construir_base_operativa_pl <- function(
       status_supervisor  = Status
     )
 
-  # Voceros → brigada → coordinador
-  base_aux <- estructura |>
-    dplyr::inner_join(
-      usuarios |>
-        dplyr::transmute(
-          Id,
-          nombre_vocero = paste(Nombre, APaterno, AMaterno),
-          vocero        = Num,
-          status_vocero = Status
-        ),
-      by = dplyr::join_by(IdUsuario == Id)
+  # Voceros activos con brigada asignada en Usuarios (estado actual).
+  # Coordinadores excluidos: su página propia se genera vía coordinadores_voceros.
+  coord_ids <- cat_coord |> dplyr::pull(Id)
+
+  base_aux <- usuarios |>
+    dplyr::filter(!is.na(IdBrigada), as.logical(Status), !Id %in% coord_ids) |>
+    dplyr::transmute(
+      IdUsuario     = Id,
+      IdBrigada,
+      nombre_vocero = paste(Nombre, APaterno, AMaterno),
+      vocero        = Num,
+      status_vocero = Status
     ) |>
-    dplyr::filter(as.logical(status_vocero), !is.na(IdBrigada)) |>
-    dplyr::left_join(
-      brigada_corte |> dplyr::select(id_brigada, id_coordinador_log),
-      by = dplyr::join_by(IdBrigada == id_brigada)
-    ) |>
-    dplyr::left_join(
-      cat_coord,
-      by = dplyr::join_by(id_coordinador_log == Id)
-    ) |>
+    dplyr::left_join(brigadas_coord, by = dplyr::join_by(IdBrigada == id_brigada)) |>
+    dplyr::left_join(cat_coord,      by = dplyr::join_by(id_coordinador_log == Id)) |>
     dplyr::filter(!is.na(nombre_coordinador)) |>
     dplyr::mutate(dplyr::across(
       dplyr::contains("nombre"),
       ~ gsub("  ", " ", stringr::str_to_upper(stringr::str_squish(.x)))
     ))
 
-  # Coordinadores como filas propias (para el dropdown del cuestionario)
+  # Coordinadores como filas propias: sólo los que tienen el cuestionario
+  # de diálogos asignado (coordinadores que también realizan diálogos).
   coordinadores_voceros <- base_aux |>
     dplyr::distinct(id_coordinador_log, .keep_all = TRUE) |>
     dplyr::filter(status_supervisor == TRUE) |>
@@ -142,8 +131,12 @@ generar_paginas_dinamicas <- function(base_operativa, pagina_cero) {
         name = vocero,
         elements = list(elementos),
         title = glue::glue("Vocero {nombre_vocero}"),
+        # Comillas simples: glue_sql() en actualizar_pase_lista() ya duplica
+        # las comillas para el literal SQL. Usar '' aquí causaba doble-escapado
+        # ({Obtener_usuario} = ''NUM'') que SurveyJS no puede evaluar, dejando
+        # todas las páginas de voceros visibles para cualquier coordinador.
         visibleIf = glue::glue(
-          "{Obtener_usuario} = ''[supervisor]''",
+          "{Obtener_usuario} = '[supervisor]'",
           .open = "[",
           .close = "]"
         )
