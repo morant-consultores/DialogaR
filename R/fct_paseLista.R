@@ -131,8 +131,12 @@ generar_paginas_dinamicas <- function(base_operativa, pagina_cero) {
         name = vocero,
         elements = list(elementos),
         title = glue::glue("Vocero {nombre_vocero}"),
+        # Comillas simples: glue_sql() en actualizar_pase_lista() ya duplica
+        # las comillas para el literal SQL. Usar '' aquí causaba doble-escapado
+        # ({Obtener_usuario} = ''NUM'') que SurveyJS no puede evaluar, dejando
+        # todas las páginas de voceros visibles para cualquier coordinador.
         visibleIf = glue::glue(
-          "{Obtener_usuario} = ''[supervisor]''",
+          "{Obtener_usuario} = '[supervisor]'",
           .open = "[",
           .close = "]"
         )

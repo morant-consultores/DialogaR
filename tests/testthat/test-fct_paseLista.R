@@ -133,6 +133,37 @@ test_that("construir_base_operativa_pl excluye coordinador no asignado a encuest
 })
 
 # =========================================================================
+# TESTS: generar_paginas_dinamicas (escape de visibleIf)
+# =========================================================================
+
+test_that("generar_paginas_dinamicas usa comillas simples en el visibleIf de pagina", {
+  # Regresion: un '' hardcodeado en la plantilla, sumado al escape de glue_sql()
+  # en actualizar_pase_lista(), producia {Obtener_usuario} = ''NUM'' en la BD.
+  # SurveyJS no puede evaluar esa expresion, por lo que mostraba TODAS las
+  # paginas de voceros para cualquier coordinador (sin jerarquia efectiva).
+  pagina_cero <- tibble::tibble(
+    name = "0",
+    elements = list(tibble::tibble(
+      type = "radiogroup", name = "asistencia_0",
+      title = "Asistencia 0", visibleIf = "{Obtener_usuario} = '0'"
+    ))
+  )
+  base_op <- tibble::tibble(
+    IdUsuario = 12061L, IdBrigada = 86L,
+    nombre_vocero = "CARLOS STEAVEN", vocero = "6623551685",
+    status_vocero = TRUE, id_coordinador_log = 11763L,
+    nombre_coordinador = "LAURA GARCIA", supervisor = "6621381188",
+    status_supervisor = TRUE
+  )
+
+  pagina <- DialogaR:::generar_paginas_dinamicas(base_op, pagina_cero)[[1]]
+  visibleIf <- jsonlite::fromJSON(paste0("[", pagina, "]"))$visibleIf
+
+  expect_equal(visibleIf, "{Obtener_usuario} = '6621381188'")
+  expect_false(grepl("''", visibleIf))  # nunca comillas dobles
+})
+
+# =========================================================================
 # TESTS: extraer_json_molde
 # =========================================================================
 
