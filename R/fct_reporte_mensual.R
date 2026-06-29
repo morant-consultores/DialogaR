@@ -135,6 +135,22 @@ generar_reporte_brigadas <- function(
         !is.na(vocero),
         is.na(status_vocero) | status_vocero | vocero %in% df_stats$usuario_num
       ) |>
+      # Conservar solo las columnas estructurales canónicas (las del nesting()
+      # de complete()). Columnas extra de bd_aux (p. ej. nombre_zona_trabajo /
+      # nombre_grupo en v0.3) se vuelven NA en las fechas completadas y, al no
+      # estar en el nesting, dividen a cada vocero en filas vacías duplicadas
+      # dentro del pivot_wider posterior.
+      dplyr::select(
+        municipio,
+        distrito,
+        nombre_brigada,
+        nombre_coordinador,
+        supervisor,
+        status_coord,
+        nombre_vocero,
+        vocero,
+        status_vocero
+      ) |>
       dplyr::left_join(df_stats, by = dplyr::join_by(vocero == usuario_num))
 
     # Unir Supervisores: solo personas con Cargo = "Coordinador de Brigada".
