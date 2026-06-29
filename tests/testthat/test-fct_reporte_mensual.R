@@ -637,3 +637,55 @@ test_that("coordinador con brigada propia (dist 02) y brigada supervisada (dist 
   expect_equal(coord_rows$Total, 2L)
   expect_equal(sum(resultado$registros$Total, na.rm = TRUE), 2L)
 })
+
+test_that("bd_aux v0.3 con columnas extra (nombre_zona_trabajo/nombre_grupo) no genera filas vacías duplicadas", {
+  # Regresión v0.3: construir_bd_aux() agrega nombre_zona_trabajo y nombre_grupo.
+  # Si un vocero no trabaja todos los días del rango, tidyr::complete() rellena
+  # esas columnas (ausentes del nesting) con NA en las fechas completadas, y el
+  # pivot_wider posterior parte al vocero en una fila real + una fila vacía.
+  corte     <- as.Date("2026-03-25")
+  fecha_ini <- as.Date("2026-03-23")
+
+  # El vocero "001" solo registra actividad el primer día del rango (3 días)
+  bd_completa <- make_bd_completa_multi(
+    fechas       = fecha_ini,
+    usuario_nums = "001"
+  )
+
+  bd_aux <- tibble::tibble(
+    distrito            = "01",
+    municipio           = "Centro",
+    nombre_brigada      = "BRIGADA TEST",
+    nombre_zona_trabajo = "ZONA A",
+    nombre_grupo        = "GRUPO 1",
+    nombre_coordinador  = "COORD UNO",
+    supervisor          = "002",
+    status_coord        = TRUE,
+    nombre_vocero       = "VOC UNO",
+    vocero              = "001",
+    status_vocero       = TRUE
+  )
+
+  testthat::local_mocked_bindings(
+    tbl = function(src, ...) mock_usuarios_tibble(),
+    .package = "dplyr"
+  )
+
+  resultado <- suppressWarnings(generar_reporte_brigadas(
+    reporte     = "semanal",
+    corte       = corte,
+    id_proyecto = 10L,
+    pool        = NULL,
+    bd_completa = bd_completa,
+    bd_aux      = bd_aux,
+    insumos     = make_insumos_cat(),
+    week_start  = 1L
+  ))
+
+  filas_vocero <- dplyr::filter(resultado$registros, vocero == "001")
+
+  # El vocero aparece exactamente una vez (sin fila vacía duplicada)
+  expect_equal(nrow(filas_vocero), 1L)
+  expect_equal(filas_vocero$Total, 1L)
+  expect_equal(sum(resultado$registros$Total, na.rm = TRUE), 1L)
+})
