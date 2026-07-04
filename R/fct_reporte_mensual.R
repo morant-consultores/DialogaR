@@ -393,3 +393,178 @@ generar_reporte_brigadas <- function(
     rango_fechas = rango_fechas
   )
 }
+
+#' Corregir filas de personal que cambió de rol durante la semana
+#'
+#' @description
+#' Post-procesa el `registros` de [generar_reporte_brigadas()] para dar de alta
+#' las filas de nómina de brigadistas cuyo rol cambió dentro de la ventana del
+#' reporte. `generar_reporte_brigadas()` arma la estructura a partir del
+#' catálogo **al corte**, por lo que pierde a quien transicionó de rol durante
+#' la semana. Esta función reconstruye esas filas usando el histórico (actividad
+#' fechada, pase de lista y logs), sin alterar la contabilidad de diálogos.
+#'
+#' **Casos que corrige:**
+#' * **Vocero promovido a coordinador (Tipo A):** sus diálogos de la semana
+#'   (hechos como vocero) quedan pegados a su fila de coordinador. Se mueven a
+#'   una fila de vocero bajo la brigada donde efectivamente los registró
+#'   (`bd_completa$id_brigada` conserva la brigada histórica por fecha) y se
+#'   ponen en cero los diálogos de su fila de coordinador. El total de diálogos
+#'   del reporte no cambia.
+#' * **Coordinador dado de baja con asistencia en la semana (Tipo B):** al
+#'   quedar sin cargo/brigada al corte desaparece del reporte. Se detecta por
+#'   pase de lista (`obtener_usuario`, quien pasa lista) y se inyecta su fila de
+#'   coordinador (diálogos en cero, `status_coord = FALSE`) con `fecha_baja` en
+#'   su **último día de pase de lista** — el dato duro de su último día laborado.
+#'
+#' @param registros Tibble `registros` devuelto por [generar_reporte_brigadas()].
+#' @param bd_completa Tibble de actividad con `id_brigada` resuelto por fecha
+#'   (salida de [resolver_brigada_en_fecha()]).
+#' @param insumos Lista de insumos (misma que se pasó a `generar_reporte_brigadas`).
+#' @param rango_fechas Vector Date de la ventana (elemento `rango_fechas` de la salida).
+#' @param pool Conexión DBI/pool (para resolver coordinadores fuera del catálogo).
+#' @param id_proyecto Numeric/Integer. ID del proyecto.
+#' @param pase_lista Tibble de pase de lista con columnas `fecha` y
+#'   `obtener_usuario` (p. ej. `dplyr::bind_rows(insumos$pase_lista)`). Si es
+#'   `NULL` se omite el Tipo B.
+#'
+#' @return El mismo `registros` con las filas corregidas/agregadas.
+#' @export
+corregir_transiciones_rol <- function(registros, bd_completa, insumos, rango_fechas,
+                                      pool, id_proyecto, pase_lista = NULL) {
+  fcols    <- as.character(rango_fechas)
+  usuarios <- insumos$cat$usuarios
+  bd_aux   <- insumos$bd_aux
+
+  meta_por_coord <- bd_aux |>
+    dplyr::distinct(municipio, distrito, nombre_brigada, nombre_coordinador,
+                    supervisor, status_coord, nombre_zona_trabajo, nombre_grupo)
+
+  altas <- insumos$cat$usuario_log |>
+    dplyr::arrange(FechaInsert) |>
+    dplyr::distinct(IdUsuario, .keep_all = TRUE) |>
+    dplyr::transmute(IdUsuario, fecha_alta = as.Date(FechaInsert)) |>
+    dplyr::left_join(usuarios |> dplyr::transmute(IdUsuario = id_usuario, vocero = as.character(num)),
+                     by = "IdUsuario") |>
+    dplyr::select(vocero, fecha_alta)
+
+  coord_self_nums <- registros |> dplyr::filter(vocero == supervisor) |>
+    dplyr::pull(vocero) |> unique()
+
+  coord_num_por_brig <- insumos$cat$brigadas |>
+    dplyr::left_join(usuarios |> dplyr::select(id_usuario, num),
+                     by = c("id_usuario_brigada" = "id_usuario")) |>
+    dplyr::transmute(id_brigada, coord_num = as.character(num))
+
+  # ---------- Tipo A: vocero promovido a coordinador con actividad como vocero ----------
+  act_voc <- bd_completa |>
+    dplyr::filter(fecha %in% rango_fechas, desglose == "Efectivo") |>
+    dplyr::count(usuario_num, id_brigada, fecha, name = "n") |>
+    dplyr::left_join(coord_num_por_brig, by = "id_brigada") |>
+    dplyr::filter(usuario_num %in% coord_self_nums, usuario_num != coord_num)
+
+  filas_voc <- NULL
+  if (nrow(act_voc) > 0) {
+    met <- bd_completa |>
+      dplyr::filter(fecha %in% rango_fechas, usuario_num %in% act_voc$usuario_num) |>
+      dplyr::summarise(
+        dur  = mean(as.numeric(dplyr::if_else(desglose == "Efectivo", duracion_minutos, NA_real_)), na.rm = TRUE),
+        trab = as.numeric(difftime(max(fecha_fin, na.rm = TRUE), min(fecha_inicio, na.rm = TRUE), units = "hours")),
+        .by = c(usuario_num, fecha)) |>
+      dplyr::summarise(duracion_promedio = mean(dur, na.rm = TRUE),
+                       trabajo_diario    = mean(trab, na.rm = TRUE), .by = usuario_num)
+
+    filas_voc <- act_voc |>
+      dplyr::group_by(usuario_num, coord_num, fecha) |>
+      dplyr::summarise(n = sum(n), .groups = "drop") |>
+      tidyr::pivot_wider(names_from = fecha, values_from = n, values_fill = 0) |>
+      dplyr::rename(vocero = usuario_num, supervisor = coord_num) |>
+      dplyr::left_join(meta_por_coord, by = "supervisor") |>
+      dplyr::left_join(usuarios |> dplyr::transmute(vocero = as.character(num), nombre_vocero = nombre_completo), by = "vocero") |>
+      dplyr::left_join(met |> dplyr::rename(vocero = usuario_num), by = "vocero") |>
+      dplyr::left_join(altas, by = "vocero") |>
+      dplyr::mutate(status_vocero = TRUE, fecha_baja = as.Date(NA), encuesta_id = "285")
+    for (fc in fcols) if (!fc %in% names(filas_voc)) filas_voc[[fc]] <- 0
+    filas_voc <- filas_voc |>
+      dplyr::rowwise() |>
+      dplyr::mutate(Total = sum(dplyr::c_across(dplyr::any_of(fcols)), na.rm = TRUE),
+                    dias_habiles_trabajados = sum(dplyr::c_across(dplyr::any_of(fcols)) != 0, na.rm = TRUE),
+                    promedio_diario = ifelse(dias_habiles_trabajados > 0, Total / dias_habiles_trabajados, 0)) |>
+      dplyr::ungroup()
+
+    # Cero los diálogos de la fila de coordinador (ya se mudaron a la fila vocera)
+    mask <- registros$vocero %in% act_voc$usuario_num & registros$vocero == registros$supervisor
+    registros[mask, fcols] <- 0
+    registros$Total[mask] <- 0
+    registros$dias_habiles_trabajados[mask] <- 0
+    registros$promedio_diario[mask] <- 0
+    registros$encuesta_id[mask] <- NA
+    cli::cli_alert_info(
+      "Transiciones de rol: {sum(mask)} vocero(s) promovido(s) con actividad reubicados a su fila de vocero."
+    )
+  }
+
+  # ---------- Tipo B: coordinador con asistencia en la semana pero ausente ----------
+  filas_coord <- NULL
+  if (!is.null(pase_lista) && "obtener_usuario" %in% names(pase_lista)) {
+    asis <- pase_lista |>
+      dplyr::mutate(fecha = as.Date(fecha)) |>
+      dplyr::filter(fecha %in% rango_fechas, !is.na(obtener_usuario)) |>
+      dplyr::summarise(ultimo_dia = max(fecha), .by = obtener_usuario) |>
+      dplyr::rename(vocero = obtener_usuario) |>
+      dplyr::filter(!vocero %in% coord_self_nums)
+
+    if (nrow(asis) > 0) {
+      # Estos coordinadores ya no figuran en cat$usuarios (baja / cargo removido):
+      # se resuelven directo de la BD.
+      u_bd <- dplyr::tbl(pool, "Usuarios") |>
+        dplyr::filter(IdProyecto == !!id_proyecto, Num %in% !!asis$vocero) |>
+        dplyr::select(Id, Num, Nombre, APaterno, AMaterno, Status) |>
+        dplyr::collect() |>
+        dplyr::transmute(vocero = as.character(Num), id_usuario = Id,
+                         nombre_completo = trimws(paste(Nombre, APaterno, AMaterno)),
+                         status = as.logical(Status))
+      alta_bd <- dplyr::tbl(pool, "UsuarioLog") |>
+        dplyr::filter(IdProyecto == !!id_proyecto, IdUsuario %in% !!u_bd$id_usuario) |>
+        dplyr::select(IdUsuario, FechaInsert) |>
+        dplyr::collect() |>
+        dplyr::summarise(fecha_alta = as.Date(min(FechaInsert)), .by = IdUsuario)
+      blog <- dplyr::tbl(pool, "BrigadasLog") |>
+        dplyr::filter(IdProyecto == !!id_proyecto, IdUsuario %in% !!u_bd$id_usuario) |>
+        dplyr::select(BrigadaId, NombreBrigada, IdUsuario, FechaInsert) |>
+        dplyr::collect() |>
+        dplyr::arrange(FechaInsert) |>
+        dplyr::summarise(nombre_brigada = dplyr::last(NombreBrigada),
+                         brigada_id = dplyr::last(BrigadaId), .by = IdUsuario)
+      # metadata (municipio/distrito/zona/grupo) del titular actual de esa brigada,
+      # cruzada por num de coordinador (evita desajuste de formato de nombre_brigada)
+      meta_actual <- coord_num_por_brig |>
+        dplyr::transmute(brigada_id = id_brigada, supervisor = coord_num) |>
+        dplyr::left_join(dplyr::distinct(meta_por_coord, supervisor, municipio, distrito,
+                                         nombre_zona_trabajo, nombre_grupo),
+                         by = "supervisor") |>
+        dplyr::select(-supervisor)
+
+      filas_coord <- asis |>
+        dplyr::left_join(u_bd, by = "vocero") |>
+        dplyr::left_join(alta_bd, by = c("id_usuario" = "IdUsuario")) |>
+        dplyr::left_join(blog, by = c("id_usuario" = "IdUsuario")) |>
+        dplyr::left_join(meta_actual, by = "brigada_id") |>
+        dplyr::transmute(
+          municipio, distrito, nombre_brigada,
+          nombre_coordinador = nombre_completo, supervisor = vocero, status_coord = status,
+          nombre_vocero = nombre_completo, vocero, status_vocero = status,
+          nombre_zona_trabajo, nombre_grupo,
+          fecha_alta, fecha_baja = ultimo_dia, encuesta_id = NA_character_)
+      for (fc in fcols) filas_coord[[fc]] <- 0
+      filas_coord <- filas_coord |>
+        dplyr::mutate(Total = 0, dias_habiles_trabajados = 0,
+                      duracion_promedio = NA_real_, trabajo_diario = NA_real_, promedio_diario = 0)
+      cli::cli_alert_info(
+        "Transiciones de rol: {nrow(filas_coord)} coordinador(es) con pase de lista pero baja al corte reincorporado(s)."
+      )
+    }
+  }
+
+  dplyr::bind_rows(registros, filas_voc, filas_coord)
+}
