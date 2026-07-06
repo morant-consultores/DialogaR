@@ -689,3 +689,206 @@ test_that("bd_aux v0.3 con columnas extra (nombre_zona_trabajo/nombre_grupo) no 
   expect_equal(filas_vocero$Total, 1L)
   expect_equal(sum(resultado$registros$Total, na.rm = TRUE), 1L)
 })
+
+# =========================================================================
+# TESTS: reincorporación de personal fuera del catálogo al corte (por fecha)
+# =========================================================================
+
+# Fixtures con histórico completo (UsuarioLog / BrigadasLog / num_map).
+# Brigadas y coordinadores: 100->002, 700->500(baja), 800->600, 900->601.
+make_usuarios_cat_full <- function() {
+  tibble::tibble(
+    id_usuario      = c(1L, 2L, 5L, 6L, 7L),
+    num             = c("001", "002", "500", "600", "601"),
+    cargo           = c("Vocero", rep("Coordinador de Brigada", 4)),
+    status          = c(TRUE, TRUE, FALSE, TRUE, TRUE),
+    nombre_completo = c("JUAN PEREZ", "CARLOS SOTO", "MARIA LUNA", "PEDRO GIL", "ANA ROA")
+  )
+}
+
+make_usuario_log_full <- function() {
+  tibble::tibble(
+    IdUsuario   = c(1L, 2L, 5L, 6L, 7L),
+    FechaInsert = "2026-01-01 00:00:00"
+  )
+}
+
+make_brigada_log_full <- function() {
+  tibble::tibble(
+    IdHistorico     = 1:4,
+    BrigadaId       = c(100L, 700L, 800L, 900L),
+    NombreBrigada   = c("06 BRIGADA NORTE", "07 BRIGADA SUR",
+                        "08 BRIGADA ESTE", "09 BRIGADA OESTE"),
+    IdUsuario       = c(2L, 5L, 6L, 7L),
+    IdZonaDeTrabajo = 1L,
+    IdGrupo         = 1L,
+    Activo          = TRUE,
+    fecha_evento    = as.Date("2026-01-01")
+  )
+}
+
+make_num_map_full <- function() {
+  tibble::tibble(
+    id_usuario = c(1L, 2L, 5L, 6L, 7L),
+    num        = c("001", "002", "500", "600", "601")
+  )
+}
+
+make_insumos_full <- function(usuarios_encuesta = NULL) {
+  list(cat = list(
+    usuarios          = make_usuarios_cat_full(),
+    usuario_log       = make_usuario_log_full(),
+    brigada_log       = make_brigada_log_full(),
+    num_map           = make_num_map_full(),
+    usuarios_encuesta = usuarios_encuesta
+  ))
+}
+
+# Mock de la tabla Usuarios con columnas de nombre (para resolver identidad de
+# huérfanos) y de baja (para el cálculo de altas/bajas de la base).
+mock_usuarios_full <- function() {
+  tibble::tibble(
+    Id          = c(1L, 2L, 5L, 6L, 7L),
+    IdProyecto  = 10L,
+    Num         = c("001", "002", "500", "600", "601"),
+    Status      = c(TRUE, TRUE, FALSE, TRUE, TRUE),
+    FechaUpdate = "2026-01-01",
+    Nombre      = c("JUAN", "CARLOS", "MARIA", "PEDRO", "ANA"),
+    APaterno    = c("PEREZ", "SOTO", "LUNA", "GIL", "ROA"),
+    AMaterno    = ""
+  )
+}
+
+test_that("coordinador dado de baja con diálogos en la ventana conserva su actividad (total intacto)", {
+  corte     <- as.Date("2026-03-25")
+  fecha_ini <- as.Date("2026-03-23")
+  fechas    <- seq.Date(fecha_ini, corte, by = "day")
+
+  bd_completa <- dplyr::bind_rows(
+    # Vocero activo "001" en su brigada 100 (1 diálogo)
+    tibble::tibble(
+      fecha = fechas[1], usuario_num = "001", id_brigada = 100L,
+      desglose = "Efectivo", duracion_minutos = 10, encuesta_id = 1L,
+      fecha_inicio = as.POSIXct("2026-03-23 08:00:00"),
+      fecha_fin    = as.POSIXct("2026-03-23 14:00:00")
+    ),
+    # Coordinador dado de baja "500" que sí registró (2 diálogos) en su brigada 700
+    tibble::tibble(
+      fecha = fechas[1:2], usuario_num = "500", id_brigada = 700L,
+      desglose = "Efectivo", duracion_minutos = 12, encuesta_id = 1L,
+      fecha_inicio = as.POSIXct(paste(as.character(fechas[1:2]), "08:00:00")),
+      fecha_fin    = as.POSIXct(paste(as.character(fechas[1:2]), "14:00:00"))
+    )
+  )
+
+  # bd_aux al corte: "500" ya no figura (baja); solo el vocero "001".
+  bd_aux <- tibble::tibble(
+    distrito = "06", municipio = "Centro", nombre_brigada = "06 BRIGADA NORTE",
+    nombre_coordinador = "CARLOS SOTO", supervisor = "002", status_coord = TRUE,
+    nombre_vocero = "JUAN PEREZ", vocero = "001", status_vocero = TRUE
+  )
+
+  testthat::local_mocked_bindings(
+    tbl = function(src, ...) mock_usuarios_full(),
+    .package = "dplyr"
+  )
+
+  resultado <- suppressWarnings(generar_reporte_brigadas(
+    reporte = "semanal", corte = corte, id_proyecto = 10L, pool = NULL,
+    bd_completa = bd_completa, bd_aux = bd_aux,
+    insumos = make_insumos_full(), week_start = 1L
+  ))
+
+  fila500 <- dplyr::filter(resultado$registros, vocero == "500")
+  expect_equal(nrow(fila500), 1L)
+  expect_equal(fila500$Total, 2L)
+  # Brigada/coordinador resueltos por fecha desde BrigadasLog, no del catálogo al corte
+  expect_equal(fila500$nombre_brigada, "07 BRIGADA SUR")
+  # Total intacto: 3 efectivos (1 de "001" + 2 de "500")
+  expect_equal(sum(resultado$registros$Total, na.rm = TRUE), 3L)
+})
+
+test_that("coordinador con cuestionario asignado y sin diálogos aparece en ceros; uno no asignado no aparece", {
+  corte     <- as.Date("2026-03-25")
+  fecha_ini <- as.Date("2026-03-23")
+  fechas    <- seq.Date(fecha_ini, corte, by = "day")
+
+  # Solo el vocero "001" tiene actividad; "600" y "601" no registran nada.
+  bd_completa <- tibble::tibble(
+    fecha = fechas[1], usuario_num = "001", id_brigada = 100L,
+    desglose = "Efectivo", duracion_minutos = 10, encuesta_id = 1L,
+    fecha_inicio = as.POSIXct("2026-03-23 08:00:00"),
+    fecha_fin    = as.POSIXct("2026-03-23 14:00:00")
+  )
+
+  bd_aux <- tibble::tibble(
+    distrito = "06", municipio = "Centro", nombre_brigada = "06 BRIGADA NORTE",
+    nombre_coordinador = "CARLOS SOTO", supervisor = "002", status_coord = TRUE,
+    nombre_vocero = "JUAN PEREZ", vocero = "001", status_vocero = TRUE
+  )
+
+  # "600" asignado al cuestionario 1; "601" NO asignado.
+  usuarios_encuesta <- tibble::tibble(
+    UsuarioId = c(1L, 2L, 6L), EncuestaId = 1L, Activo = TRUE
+  )
+
+  testthat::local_mocked_bindings(
+    tbl = function(src, ...) mock_usuarios_full(),
+    .package = "dplyr"
+  )
+
+  resultado <- suppressWarnings(generar_reporte_brigadas(
+    reporte = "semanal", corte = corte, id_proyecto = 10L, pool = NULL,
+    bd_completa = bd_completa, bd_aux = bd_aux,
+    insumos = make_insumos_full(usuarios_encuesta = usuarios_encuesta),
+    week_start = 1L
+  ))
+
+  fila600 <- dplyr::filter(resultado$registros, vocero == "600")
+  expect_equal(nrow(fila600), 1L)
+  expect_equal(fila600$Total, 0)
+  expect_equal(fila600$nombre_brigada, "08 BRIGADA ESTE")
+
+  # "601" no está asignado y no tiene actividad → no aparece.
+  expect_false(any(resultado$registros$vocero == "601", na.rm = TRUE))
+
+  # El total no se altera por las filas en ceros.
+  expect_equal(sum(resultado$registros$Total, na.rm = TRUE), 1L)
+})
+
+test_that("vocero promovido a coordinador (en el catálogo al corte) aparece una vez con su actividad", {
+  corte     <- as.Date("2026-03-25")
+  fecha_ini <- as.Date("2026-03-23")
+  fechas    <- seq.Date(fecha_ini, corte, by = "day")
+
+  # "002" hizo diálogos como vocero antes de ser coordinador; al corte es coordinador.
+  bd_completa <- tibble::tibble(
+    fecha = fechas[1:2], usuario_num = "002", id_brigada = 100L,
+    desglose = "Efectivo", duracion_minutos = 11, encuesta_id = 1L,
+    fecha_inicio = as.POSIXct(paste(as.character(fechas[1:2]), "08:00:00")),
+    fecha_fin    = as.POSIXct(paste(as.character(fechas[1:2]), "14:00:00"))
+  )
+
+  # bd_aux al corte: "002" figura como coordinador (auto-supervisado) de su brigada.
+  bd_aux <- tibble::tibble(
+    distrito = "06", municipio = "Centro", nombre_brigada = "06 BRIGADA NORTE",
+    nombre_coordinador = "CARLOS SOTO", supervisor = "002", status_coord = TRUE,
+    nombre_vocero = "CARLOS SOTO", vocero = "002", status_vocero = TRUE
+  )
+
+  testthat::local_mocked_bindings(
+    tbl = function(src, ...) mock_usuarios_full(),
+    .package = "dplyr"
+  )
+
+  resultado <- suppressWarnings(generar_reporte_brigadas(
+    reporte = "semanal", corte = corte, id_proyecto = 10L, pool = NULL,
+    bd_completa = bd_completa, bd_aux = bd_aux,
+    insumos = make_insumos_full(), week_start = 1L
+  ))
+
+  fila002 <- dplyr::filter(resultado$registros, vocero == "002")
+  expect_equal(nrow(fila002), 1L)
+  expect_equal(fila002$Total, 2L)
+  expect_equal(sum(resultado$registros$Total, na.rm = TRUE), 2L)
+})
