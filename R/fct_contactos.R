@@ -140,6 +140,11 @@ construir_base_contactos <- function(
     dplyr::filter(fecha <= corte) |>
     dplyr::left_join(cat_voceros, dplyr::join_by(usuario_num == vocero))
 
+  # grupo_whats: no todos los cuestionarios lo capturan (p.ej. Cuauhtémoc/304)
+  if (!"grupo_whats" %in% names(bd_proc)) {
+    bd_proc$grupo_whats <- NA_character_
+  }
+
   res <- bd_proc |>
     dplyr::transmute(
       id,

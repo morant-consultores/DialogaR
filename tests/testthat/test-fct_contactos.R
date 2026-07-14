@@ -105,6 +105,24 @@ test_that("construir_base_contactos lanza error si faltan columnas de conocimien
 })
 
 # ------------------------------------------------------------
+# 3.5 grupo_whats ausente (cuestionarios que no lo capturan, p.ej. 304)
+# ------------------------------------------------------------
+
+test_that("construir_base_contactos no falla si bd_completa no trae grupo_whats", {
+  bd <- make_bd_completa() |> dplyr::select(-grupo_whats)
+
+  res <- construir_base_contactos(
+    personaje   = garcia,
+    bd_completa = bd,
+    corte       = as.Date("2026-03-31"),
+    bd_aux      = make_bd_aux()
+  )
+
+  expect_true("grupo_whats" %in% names(res))
+  expect_true(all(res$grupo_whats == "-"))
+})
+
+# ------------------------------------------------------------
 # 4. Filtro por fecha <= corte
 # ------------------------------------------------------------
 
