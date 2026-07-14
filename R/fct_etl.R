@@ -640,6 +640,11 @@ cargar_insumos <- function(
     dplyr::collect() |>
     dplyr::transmute(id_usuario = Id, num = as.character(Num)) |>
     dplyr::distinct(id_usuario, .keep_all = TRUE)
+  # Asignaciones usuario-cuestionario: base para reincorporar coordinadores con
+  # cuestionario asignado (aunque no hayan registrado diálogos) en el reporte.
+  usuarios_encuesta   <- dplyr::tbl(pool, "UsuariosEncuesta") |>
+    dplyr::select(UsuarioId, EncuestaId, Activo) |>
+    dplyr::collect()
 
   bd_actividad <- cargar_actividad(
     pool = pool,
@@ -690,7 +695,8 @@ cargar_insumos <- function(
       zonas       = zonas_cat,
       grupos      = grupos_cat,
       usuario_log = usuario_log,
-      num_map     = num_map
+      num_map     = num_map,
+      usuarios_encuesta = usuarios_encuesta
     )
   )
 

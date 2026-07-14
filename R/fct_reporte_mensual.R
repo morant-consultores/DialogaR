@@ -220,21 +220,13 @@ generar_reporte_brigadas <- function(
       .by = c(usuario_num, fecha)
     )
 
-  # Integridad: voceros con actividad que no están en el catálogo → sus registros
-  # se perderían en el left join de procesar_metricas (bd_aux es la tabla izquierda).
+  # Voceros con actividad ausentes del catálogo al corte (coordinador dado de
+  # baja, cambio de rol). No se excluyen: se reincorporan más abajo con su
+  # estructura resuelta por fecha, de modo que el total de diálogos no cambie.
   voceros_sin_catalogo <- dplyr::setdiff(
     unique(stats_base$usuario_num),
     unique(bd_aux$vocero)
   )
-  if (length(voceros_sin_catalogo) > 0) {
-    n_perdidos <- stats_base |>
-      dplyr::filter(usuario_num %in% voceros_sin_catalogo) |>
-      dplyr::summarise(total = sum(n, na.rm = TRUE)) |>
-      dplyr::pull(total)
-    cli::cli_alert_danger(
-      "Integridad comprometida: {length(voceros_sin_catalogo)} vocero(s) con {n_perdidos} registro(s) efectivos no figuran en el cat\u00e1logo administrativo y ser\u00e1n excluidos del reporte: {paste(voceros_sin_catalogo, collapse = ', ')}"
-    )
-  }
 
   # Ancla de integridad: conteo directo sobre bd_completa (fuente de verdad),
   # independiente del agregado stats_base para evitar validaciones circulares.
@@ -261,6 +253,137 @@ generar_reporte_brigadas <- function(
     cli::cli_alert_warning(
       "{nrow(voceros_multi_encuesta)} vocero(s) trabajaron en más de un cuestionario: {paste(voceros_multi_encuesta$usuario_num, collapse = ', ')}"
     )
+  }
+
+  # -------------------------------------------------------------------------
+  # Reincorporación de personal fuera del catálogo al corte (resuelto por fecha)
+  # -------------------------------------------------------------------------
+  # Regla dura: el total de diálogos de la ventana no cambia. En vez de excluir
+  # a quien registró actividad pero ya no figura en la estructura al corte, o de
+  # omitir a coordinadores con cuestionario asignado, se reconstruyen sus filas
+  # y se anexan a bd_aux para que el pipeline las procese de forma uniforme.
+  # Brigada del vocero: UsuarioLog (bd_completa$id_brigada). Coordinador de esa
+  # brigada: BrigadasLog vía resolver_coordinador_en_fecha().
+  brigada_log      <- insumos$cat$brigada_log
+  num_map          <- insumos$cat$num_map
+  hay_brigada_hist <- !is.null(brigada_log) && !is.null(num_map) &&
+    "id_brigada" %in% names(bd_completa)
+
+  # Lookup brigada -> coordinador/metadata vigente al corte (BrigadasLog LOCF).
+  estructura_brigada <- tibble::tibble(
+    id_brigada = integer(), nombre_brigada = character(),
+    supervisor = character(), nombre_coordinador = character(),
+    status_coord = logical()
+  )
+  if (hay_brigada_hist) {
+    estructura_brigada <- resolver_coordinador_en_fecha(brigada_log, corte) |>
+      dplyr::left_join(num_map, by = c("id_coordinador_log" = "id_usuario")) |>
+      dplyr::left_join(
+        insumos$cat$usuarios |>
+          dplyr::select(dplyr::any_of(c("id_usuario", "nombre_completo", "status"))),
+        by = c("id_coordinador_log" = "id_usuario")
+      ) |>
+      dplyr::transmute(
+        id_brigada,
+        nombre_brigada     = nombre_brigada_log,
+        supervisor         = as.character(num),
+        nombre_coordinador = nombre_completo,
+        status_coord       = status
+      )
+  }
+  # municipio/distrito de la brigada, prestados de bd_aux cuando ya aparece por
+  # otros integrantes (evita otra consulta).
+  meta_brig <- bd_aux |>
+    dplyr::slice_head(n = 1, by = nombre_brigada) |>
+    dplyr::select(nombre_brigada, municipio, distrito)
+
+  filas_extra     <- list()
+  coord_cero_nums <- character(0)
+
+  # (1) Huérfanos con actividad: reincorporados con su última brigada de la ventana.
+  if (length(voceros_sin_catalogo) > 0) {
+    ult_brigada <- if (hay_brigada_hist) {
+      bd_completa |>
+        dplyr::filter(
+          usuario_num %in% voceros_sin_catalogo,
+          fecha >= fecha_inicio_r, fecha <= fecha_fin_r,
+          !is.na(id_brigada)
+        ) |>
+        dplyr::group_by(usuario_num) |>
+        dplyr::slice_max(fecha, n = 1, with_ties = FALSE) |>
+        dplyr::ungroup() |>
+        dplyr::transmute(vocero = usuario_num, id_brigada)
+    } else {
+      tibble::tibble(vocero = character(), id_brigada = integer())
+    }
+
+    ident <- dplyr::tbl(pool, "Usuarios") |>
+      dplyr::filter(IdProyecto == !!id_proyecto, Num %in% !!as.integer(voceros_sin_catalogo)) |>
+      dplyr::select(Num, Nombre, APaterno, AMaterno, Status) |>
+      dplyr::collect() |>
+      dplyr::transmute(
+        vocero        = as.character(Num),
+        nombre_vocero = toupper(stringr::str_squish(paste(Nombre, APaterno, AMaterno))),
+        status_vocero = as.logical(Status)
+      )
+
+    filas_extra$orfanos <- tibble::tibble(vocero = voceros_sin_catalogo) |>
+      dplyr::left_join(ult_brigada, by = "vocero") |>
+      dplyr::left_join(estructura_brigada, by = "id_brigada") |>
+      dplyr::left_join(meta_brig, by = "nombre_brigada") |>
+      dplyr::left_join(ident, by = "vocero") |>
+      dplyr::transmute(
+        municipio, distrito,
+        nombre_brigada     = tidyr::replace_na(nombre_brigada, "SIN ASIGNAR"),
+        nombre_coordinador = tidyr::replace_na(nombre_coordinador, "SIN ASIGNAR"),
+        supervisor         = tidyr::replace_na(supervisor, "SIN ASIGNAR"),
+        status_coord,
+        nombre_vocero, vocero, status_vocero
+      )
+    cli::cli_alert_info(
+      "Reincorporados {length(voceros_sin_catalogo)} usuario(s) con actividad fuera del catálogo al corte (resueltos por fecha), para no alterar el total."
+    )
+  }
+
+  # (2) Coordinadores con cuestionario asignado (UsuariosEncuesta) sin diálogos:
+  # aparecen en ceros. Requiere el histórico de brigada para ubicar su brigada.
+  usuarios_encuesta <- insumos$cat$usuarios_encuesta
+  if (!is.null(usuarios_encuesta) && hay_brigada_hist) {
+    encuestas_reporte <- unique(bd_completa$encuesta_id[
+      bd_completa$fecha >= fecha_inicio_r & bd_completa$fecha <= fecha_fin_r
+    ])
+    asignados_ids <- usuarios_encuesta |>
+      dplyr::filter(EncuestaId %in% encuestas_reporte, Activo == TRUE) |>
+      dplyr::pull(UsuarioId)
+
+    ya_presentes <- unique(c(bd_aux$vocero, bd_aux$supervisor, voceros_sin_catalogo))
+    coord_cero <- resolver_coordinador_en_fecha(brigada_log, corte) |>
+      dplyr::filter(id_coordinador_log %in% asignados_ids) |>
+      dplyr::distinct(id_brigada) |>
+      dplyr::left_join(estructura_brigada, by = "id_brigada") |>
+      dplyr::filter(!is.na(supervisor), !supervisor %in% ya_presentes) |>
+      dplyr::left_join(meta_brig, by = "nombre_brigada") |>
+      dplyr::distinct(supervisor, .keep_all = TRUE)
+
+    if (nrow(coord_cero) > 0) {
+      filas_extra$coord_cero <- coord_cero |>
+        dplyr::transmute(
+          municipio, distrito, nombre_brigada,
+          nombre_coordinador, supervisor, status_coord,
+          nombre_vocero = nombre_coordinador,
+          vocero        = supervisor,
+          status_vocero = status_coord
+        )
+      coord_cero_nums <- coord_cero$supervisor
+      cli::cli_alert_info(
+        "Agregados {length(coord_cero_nums)} coordinador(es) con cuestionario asignado y sin diálogos, en ceros."
+      )
+    }
+  }
+
+  if (length(filas_extra) > 0) {
+    bd_aux     <- dplyr::bind_rows(bd_aux, dplyr::bind_rows(filas_extra))
+    coord_nums <- union(coord_nums, coord_cero_nums)
   }
 
   reg_final <- procesar_metricas(stats_base, "n")
@@ -303,7 +426,7 @@ generar_reporte_brigadas <- function(
     dplyr::ungroup() |>
     dplyr::select(-dplyr::any_of("NA")) |>
     dplyr::left_join(encuesta_id_map, by = dplyr::join_by(vocero == usuario_num)) |>
-    dplyr::filter(is.na(status_coord) | status_coord | Total > 0)
+    dplyr::filter(status_coord | Total > 0 | vocero %in% coord_cero_nums)
 
   # 7. Consolidación Final ----
   duracion_trabajo <- reg_final |>
@@ -361,7 +484,7 @@ generar_reporte_brigadas <- function(
       )
     ) |>
     dplyr::ungroup() |>
-    dplyr::filter(is.na(status_coord) | status_coord | Total > 0)
+    dplyr::filter(status_coord | Total > 0 | vocero %in% coord_cero_nums)
 
   # Alerta de Auditoría
   huerfanos <- sum(
