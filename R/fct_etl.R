@@ -642,9 +642,19 @@ cargar_insumos <- function(
     dplyr::distinct(id_usuario, .keep_all = TRUE)
   # Asignaciones usuario-cuestionario: base para reincorporar coordinadores con
   # cuestionario asignado (aunque no hayan registrado diálogos) en el reporte.
-  usuarios_encuesta   <- dplyr::tbl(pool, "UsuariosEncuesta") |>
-    dplyr::select(UsuarioId, EncuestaId, Activo) |>
-    dplyr::collect()
+  # La tabla no existe en bases de datos anteriores a v0.3.0; si falla, se omite
+  # y el bloque de coordinadores-en-cero queda inhabilitado aguas abajo.
+  usuarios_encuesta <- tryCatch(
+    dplyr::tbl(pool, "UsuariosEncuesta") |>
+      dplyr::select(UsuarioId, EncuestaId, Activo) |>
+      dplyr::collect(),
+    error = function(e) {
+      cli::cli_alert_warning(
+        "Tabla UsuariosEncuesta no disponible en este pool; coordinadores-en-cero desactivados."
+      )
+      NULL
+    }
+  )
 
   bd_actividad <- cargar_actividad(
     pool = pool,
