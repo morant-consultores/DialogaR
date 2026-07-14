@@ -175,12 +175,11 @@ ensamblar_json_final <- function(
         if ("visibleIf" %in% names(tabla)) {
           elements <- tabla
         } else {
-          tabla <- tabla |> dplyr::mutate(choices = list(relacion))
-          choices <- tabla |> dplyr::pull(choices)
-          elements <- .x$elements |>
-            purrr::pluck(1) |>
-            dplyr::as_tibble() |>
-            dplyr::mutate(choices = choices)
+          # NB: NO usar el patrón `choices <- pull(...); mutate(choices = choices)`.
+          # dplyr resuelve la RHS `choices` contra la COLUMNA existente (data mask),
+          # no contra la variable local, dejando el dropdown con los choices viejos
+          # del molde (coordinadores obsoletos). Inyectar `relacion` directamente.
+          elements <- tabla |> dplyr::mutate(choices = list(relacion))
         }
         .x$elements <- list(elements)
         .x |>
@@ -283,6 +282,16 @@ actualizar_pase_lista <- function(
     paginas_voceros = paginas_voceros,
     base_operativa = base_operativa
   )
+
+  # 5b. Normalizar marca de encoding antes del UPDATE.
+  # ensamblar_json_final puede devolver la cadena con marca "latin1" (por paste/
+  # gsub sobre fragmentos de distinto origen) aunque los BYTES ya sean UTF-8
+  # válidos. Al inlinear con glue_sql(), DBI/odbc trata una cadena marcada
+  # "latin1" como tal y RE-codifica a UTF-8, produciendo doble-encoding
+  # (p.ej. "ó" c3 b3 -> c3 83 c2 b3, visible como "Ã³"). Forzar la marca a
+  # UTF-8 (sin reconvertir bytes) evita la corrupción. Idempotente si ya es
+  # UTF-8/unknown con bytes UTF-8.
+  Encoding(json_actualizado) <- "UTF-8"
 
   # 6. Validación y persistencia
   if (!jsonlite::validate(json_actualizado)) {

@@ -417,7 +417,7 @@ test_that("actualizar_pase_lista aborta sin ejecutar UPDATE cuando el JSON es in
       pool = con, id_proyecto = 17L, id_pase_lista = 294L,
       ids_encuestas_dialogo = c(292L, 2923L), dir_backup = tempdir()
     ),
-    regexp = "inválido"
+    regexp = "inv.*lido"
   )
 
   # El UPDATE no debe haberse ejecutado: Version y JsonData intactos
