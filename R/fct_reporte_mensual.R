@@ -337,7 +337,7 @@ generar_reporte_brigadas <- function(
         nombre_brigada     = tidyr::replace_na(nombre_brigada, "SIN ASIGNAR"),
         nombre_coordinador = tidyr::replace_na(nombre_coordinador, "SIN ASIGNAR"),
         supervisor         = tidyr::replace_na(supervisor, "SIN ASIGNAR"),
-        status_coord,
+        status_coord       = tidyr::replace_na(status_coord, FALSE),
         nombre_vocero, vocero, status_vocero
       )
     cli::cli_alert_info(
@@ -369,10 +369,11 @@ generar_reporte_brigadas <- function(
       filas_extra$coord_cero <- coord_cero |>
         dplyr::transmute(
           municipio, distrito, nombre_brigada,
-          nombre_coordinador, supervisor, status_coord,
+          nombre_coordinador, supervisor,
+          status_coord  = tidyr::replace_na(status_coord, FALSE),
           nombre_vocero = nombre_coordinador,
           vocero        = supervisor,
-          status_vocero = status_coord
+          status_vocero = tidyr::replace_na(status_coord, FALSE)
         )
       coord_cero_nums <- coord_cero$supervisor
       cli::cli_alert_info(
