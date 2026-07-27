@@ -72,7 +72,7 @@ meta_usuario_condicional <- function(
       dplyr::summarise(
         viviendas_visitadas  = dplyr::n(),
         dias_trabajados      = dplyr::n_distinct(fecha),
-        diálogos_efectivos   = sum(desglose == "Efectivo", na.rm = TRUE),
+        dialogos_efectivos   = sum(desglose == "Efectivo", na.rm = TRUE),
         fechas_visita        = toString(sort(unique(fecha))),
         brigadas             = {
           vals <- sort(unique(na.omit(nombre_brigada)))
@@ -85,7 +85,7 @@ meta_usuario_condicional <- function(
       dplyr::summarise(
         viviendas_visitadas  = dplyr::n(),
         dias_trabajados      = dplyr::n_distinct(fecha),
-        diálogos_efectivos   = sum(desglose == "Efectivo", na.rm = TRUE),
+        dialogos_efectivos   = sum(desglose == "Efectivo", na.rm = TRUE),
         fechas_visita        = toString(sort(unique(fecha))),
         .by = "seccion"
       )
@@ -110,7 +110,7 @@ meta_usuario_condicional <- function(
       avance_meta = dplyr::if_else(
         is.na(meta) | meta == 0,
         0,
-        diálogos_efectivos / meta
+        dialogos_efectivos / meta
       )
     ) |>
     dplyr::relocate(fecha_corte, .after = seccion) |>

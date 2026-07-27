@@ -90,6 +90,13 @@ setup_etl_db <- function() {
     stringsAsFactors = FALSE
   ))
 
+  DBI::dbWriteTable(con, "UsuariosEncuesta", data.frame(
+    UsuarioId  = c(1L, 2L),
+    EncuestaId = c(1L, 1L),
+    Activo     = c(TRUE, TRUE),
+    stringsAsFactors = FALSE
+  ))
+
   con
 }
 
@@ -226,6 +233,10 @@ test_that("cargar_insumos respeta cargo_coordinador personalizado", {
   DBI::dbWriteTable(con, "Actividad", data.frame(
     fecha = "2026-03-20", usuario_num = "001", seccion = "0001",
     desglose = "Efectivo", duracion_minutos = 10, origen = "Actividad",
+    stringsAsFactors = FALSE
+  ))
+  DBI::dbWriteTable(con, "UsuariosEncuesta", data.frame(
+    UsuarioId = c(1L, 2L), EncuestaId = c(1L, 1L), Activo = c(TRUE, TRUE),
     stringsAsFactors = FALSE
   ))
 

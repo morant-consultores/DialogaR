@@ -188,7 +188,9 @@ cargar_actividad <- function(
     } else {
       f$tabla
     }
-    q <- dplyr::tbl(pool, tabla_ref)
+    # Cada fuente puede vivir en un pool distinto (p.ej. snapshot en otro servidor)
+    pool_fuente <- f$pool %||% pool
+    q <- dplyr::tbl(pool_fuente, tabla_ref)
 
     if (!is.null(filtro_minimo)) {
       q <- filtro_minimo(q, f)
@@ -585,6 +587,9 @@ excluir_brigadas_prueba <- function(bd_aux, bd_actividad, patron = "prueba") {
 #' @param id_proyecto Numeric. ID del proyecto a extraer.
 #' @param corte Date. Fecha límite de análisis.
 #' @param fuentes_actividad List. Lista de tablas origen y sus metadatos.
+#'   Cada elemento admite un campo opcional `pool` con una conexión DBI propia
+#'   (por ejemplo, cuando la fuente vive en un servidor distinto al de `pool`,
+#'   como un snapshot); si se omite, se usa el `pool` principal.
 #' @param ids_pase_lista Numeric vector. IDs de los cuestionarios de pase de lista.
 #' @param procesador_pl Function. Función para parsear el JSON del pase de lista.
 #' @param fecha_min_actividad Date. Límite inferior de la extracción de actividad.
@@ -635,6 +640,21 @@ cargar_insumos <- function(
     dplyr::collect() |>
     dplyr::transmute(id_usuario = Id, num = as.character(Num)) |>
     dplyr::distinct(id_usuario, .keep_all = TRUE)
+  # Asignaciones usuario-cuestionario: base para reincorporar coordinadores con
+  # cuestionario asignado (aunque no hayan registrado diálogos) en el reporte.
+  # La tabla no existe en bases de datos anteriores a v0.3.0; si falla, se omite
+  # y el bloque de coordinadores-en-cero queda inhabilitado aguas abajo.
+  usuarios_encuesta <- tryCatch(
+    dplyr::tbl(pool, "UsuariosEncuesta") |>
+      dplyr::select(UsuarioId, EncuestaId, Activo) |>
+      dplyr::collect(),
+    error = function(e) {
+      cli::cli_alert_warning(
+        "Tabla UsuariosEncuesta no disponible en este pool; coordinadores-en-cero desactivados."
+      )
+      NULL
+    }
+  )
 
   bd_actividad <- cargar_actividad(
     pool = pool,
@@ -685,7 +705,8 @@ cargar_insumos <- function(
       zonas       = zonas_cat,
       grupos      = grupos_cat,
       usuario_log = usuario_log,
-      num_map     = num_map
+      num_map     = num_map,
+      usuarios_encuesta = usuarios_encuesta
     )
   )
 
