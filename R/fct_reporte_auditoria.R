@@ -79,7 +79,11 @@ ensamblar_estructura <- function(stats_df, bd_aux_clean, coord_nums) {
 #'
 #' @description
 #' Aplica `jsonlite::fromJSON` sobre una columna de texto JSON y expande sus campos
-#' como columnas del data frame.
+#' como columnas del data frame. Usado tanto para el veredicto legado
+#' (`EvaluacionRegistro.Resultado`) como para el veredicto del bot
+#' (`ResultadoAuditoriaBot.VeredictoJson` y `RevisionAuditoriaBot.VeredictoCorregido`),
+#' que comparten el mismo esquema de campos (`dictamenFinal`, `totalEvaluacion`,
+#' `observaciones`, entre otros).
 #'
 #' @param df Data frame que contiene la columna JSON a parsear.
 #' @param col_json Caracter. Nombre de la columna de texto JSON.
@@ -140,6 +144,178 @@ fetch_auditoria_legacy <- function(pool, encuesta_id) {
     dplyr::transmute(RegistroId, usuario_num, fecha, dictamenFinal, totalEvaluacion, observaciones)
 }
 
+#' Detectar si la conexión activa es SQL Server
+#'
+#' @description
+#' Determina si `pool`/`con` apunta a una base SQL Server (vía ODBC), para decidir si aplicar
+#' el `CAST(... AS NVARCHAR(MAX))` requerido por ese backend. Si `pool` es un objeto `Pool`,
+#' hace un checkout/return de una conexión real solo para inspeccionar su clase.
+#'
+#' @param pool Objeto de conexión `pool` o una conexión `DBI` directa.
+#'
+#' @return Lógico.
+#' @keywords internal
+mssql_backend <- function(pool) {
+  con <- pool
+  if (inherits(pool, "Pool")) {
+    con <- pool::poolCheckout(pool)
+    on.exit(pool::poolReturn(con))
+  }
+  inherits(con, "Microsoft SQL Server")
+}
+
+#' Obtener auditorías (fuente bot: ResultadoAuditoriaBot)
+#'
+#' @description
+#' Extrae las auditorías automáticas del bot para la(s) encuesta(s) indicada(s), colapsando
+#' re-auditorías del mismo registro (vale la última pasada del bot) y aplicando la corrección
+#' humana de `RevisionAuditoriaBot` cuando existe (`VeredictoCorregido` reemplaza el veredicto
+#' original del bot para ese registro).
+#'
+#' Cuando se indican `fecha_inicio`/`fecha_fin`, el filtro se empuja a la consulta SQL —
+#' pensado para el reporte semanal, que solo necesita la semana inmediata anterior y no debe
+#' traer el histórico completo de auditorías del bot. Cuando ambos son `NULL`, se trae el
+#' histórico completo (uso para reportes que combinan fuentes, ver `fuente_auditoria = "combinar"`
+#' en \code{\link{generar_reporte_metricas}}).
+#'
+#' @param pool Objeto de conexión `pool`.
+#' @param encuesta_id Vector. Identificador(es) de encuesta.
+#' @param fecha_inicio Fecha. Límite inferior (inclusive), en horario CDMX, para
+#'   `ResultadoAuditoriaBot.Fecha`. `NULL` (por defecto) para no filtrar.
+#' @param fecha_fin Fecha. Límite superior (inclusive), en horario CDMX, para
+#'   `ResultadoAuditoriaBot.Fecha`. `NULL` (por defecto) para no filtrar.
+#'
+#' @return Tibble normalizado con columnas `RegistroId`, `usuario_num`, `fecha`,
+#'   `dictamenFinal`, `totalEvaluacion`, `observaciones`.
+#'
+#' @importFrom tibble tibble
+#' @importFrom lubridate with_tz
+#' @keywords internal
+fetch_auditoria_bot <- function(pool, encuesta_id, fecha_inicio = NULL, fecha_fin = NULL) {
+  # SQL Server (vía ODBC/FreeTDS) trunca columnas TEXT/NTEXT largas si no se castean
+  # explícitamente a NVARCHAR(MAX); ese CAST no es válido en otros backends (p. ej. SQLite
+  # en pruebas), por lo que solo se aplica cuando la conexión real es SQL Server.
+  cast_a_texto <- function(tbl, col_origen, col_destino) {
+    if (mssql_backend(pool)) {
+      tbl |> dplyr::mutate(!!col_destino := dplyr::sql(sprintf("CAST(%s AS NVARCHAR(MAX))", col_origen)))
+    } else {
+      tbl |> dplyr::mutate(!!col_destino := .data[[col_origen]])
+    }
+  }
+
+  lotes <- dplyr::tbl(pool, "LoteAuditoria") |>
+    dplyr::filter(EncuestaId %in% encuesta_id) |>
+    dplyr::transmute(lote_id = Id)
+
+  resultados <- dplyr::tbl(pool, "ResultadoAuditoriaBot") |>
+    dplyr::inner_join(lotes, by = dplyr::join_by(LoteAuditoriaId == lote_id))
+
+  if (!is.null(fecha_inicio) && !is.null(fecha_fin)) {
+    # ResultadoAuditoriaBot.Fecha se almacena en UTC (igual que EvaluacionRegistro.Fecha en
+    # la fuente legado); fecha_inicio/fecha_fin llegan en horario CDMX (día natural del
+    # reporte semanal). Se convierten los límites del día CDMX a su instante UTC equivalente
+    # ANTES de armar el filtro, para que se traduzca como literales portables entre backends
+    # (SQL Server, SQLite en pruebas) en vez de una expresión aritmética sobre la columna remota.
+    fecha_inicio_utc <- lubridate::with_tz(
+      as.POSIXct(paste(fecha_inicio, "00:00:00"), tz = "America/Mexico_City"), "UTC"
+    )
+    fecha_fin_exclusiva_utc <- lubridate::with_tz(
+      as.POSIXct(paste(fecha_fin + 1, "00:00:00"), tz = "America/Mexico_City"), "UTC"
+    )
+    resultados <- resultados |>
+      dplyr::filter(Fecha >= fecha_inicio_utc, Fecha < fecha_fin_exclusiva_utc)
+  }
+
+  aud <- resultados |>
+    cast_a_texto("VeredictoJson", "js") |>
+    dplyr::select(Id, RegistroId, Fecha, js) |>
+    dplyr::collect()
+
+  vacio <- tibble::tibble(RegistroId = integer(), usuario_num = character(), fecha = as.Date(character()),
+                          dictamenFinal = character(), totalEvaluacion = character(),
+                          observaciones = character())
+  if (nrow(aud) == 0) return(vacio)
+
+  # re-auditorías del mismo registro: vale la ÚLTIMA pasada del bot
+  aud <- aud |>
+    dplyr::group_by(RegistroId) |>
+    dplyr::slice_max(Id, n = 1, with_ties = FALSE) |>
+    dplyr::ungroup()
+
+  registros_id <- dplyr::tbl(pool, "Registros") |>
+    dplyr::filter(EncuestaId %in% encuesta_id) |>
+    dplyr::transmute(RegistroId = Id, usuario_num = UsuarioNum) |>
+    dplyr::collect()
+
+  # verificación HUMANA (si ya la hay): la última por auditoría
+  revision <- dplyr::tbl(pool, "RevisionAuditoriaBot") |>
+    dplyr::filter(ResultadoAuditoriaBotId %in% !!aud$Id) |>
+    cast_a_texto("VeredictoCorregido", "js_corregido") |>
+    dplyr::select(Id, ResultadoAuditoriaBotId, js_corregido) |>
+    dplyr::collect() |>
+    dplyr::group_by(ResultadoAuditoriaBotId) |>
+    dplyr::slice_max(Id, n = 1, with_ties = FALSE) |>
+    dplyr::ungroup() |>
+    dplyr::select(-Id)
+
+  aud <- aud |>
+    parsear_veredicto_json("js") |>
+    dplyr::mutate(
+      fecha_hora_cdmx = lubridate::with_tz(Fecha, tzone = "America/Mexico_City"),
+      fecha = as.Date(fecha_hora_cdmx)
+    ) |>
+    dplyr::left_join(revision, by = c("Id" = "ResultadoAuditoriaBotId"))
+
+  # cuando existe una revisión humana con veredicto corregido, esta reemplaza
+  # al veredicto original del bot para las métricas de esa auditoría
+  con_revision <- aud |> dplyr::filter(!is.na(js_corregido))
+  sin_revision <- aud |> dplyr::filter(is.na(js_corregido))
+
+  if (nrow(con_revision) > 0) {
+    con_revision <- con_revision |>
+      dplyr::select(-dictamenFinal, -totalEvaluacion, -observaciones) |>
+      parsear_veredicto_json("js_corregido")
+  }
+
+  dplyr::bind_rows(sin_revision, con_revision) |>
+    dplyr::left_join(registros_id, by = "RegistroId") |>
+    dplyr::transmute(RegistroId, usuario_num, fecha, dictamenFinal, totalEvaluacion, observaciones)
+}
+
+#' Obtener auditorías combinando fuente legado y fuente bot
+#'
+#' @description
+#' Dispatcher interno que arma el data frame de evaluaciones de auditoría según
+#' `fuente_auditoria`. En modo `"combinar"`, se privilegia el registro del bot sobre el
+#' legado cuando el mismo `RegistroId` existe en ambas fuentes (el bot ya incorpora la
+#' corrección humana cuando aplica).
+#'
+#' @param pool Objeto de conexión `pool`.
+#' @param encuesta_id Vector. Identificador(es) de encuesta.
+#' @param fuente_auditoria Caracter. Uno de `"legacy"`, `"bot"`, `"combinar"`.
+#' @param fecha_inicio_au Fecha. Inicio de la ventana semanal de auditoría.
+#' @param fecha_fin_au Fecha. Fin de la ventana semanal de auditoría (el `corte`).
+#'
+#' @return Tibble normalizado con columnas `RegistroId`, `usuario_num`, `fecha`,
+#'   `dictamenFinal`, `totalEvaluacion`, `observaciones`.
+#' @keywords internal
+obtener_evaluaciones <- function(pool, encuesta_id, fuente_auditoria, fecha_inicio_au, fecha_fin_au) {
+  if (fuente_auditoria == "legacy") {
+    return(fetch_auditoria_legacy(pool, encuesta_id))
+  }
+
+  if (fuente_auditoria == "bot") {
+    # Reporte semanal: solo se necesita la semana inmediata anterior, se empuja el filtro a SQL.
+    return(fetch_auditoria_bot(pool, encuesta_id, fecha_inicio_au, fecha_fin_au))
+  }
+
+  # "combinar": histórico completo de ambas fuentes; el bot gana cuando el RegistroId
+  # existe en ambas.
+  legacy <- fetch_auditoria_legacy(pool, encuesta_id)
+  bot    <- fetch_auditoria_bot(pool, encuesta_id, fecha_inicio = NULL, fecha_fin = NULL)
+  dplyr::bind_rows(bot, legacy |> dplyr::filter(!RegistroId %in% bot$RegistroId))
+}
+
 #' Generar Reporte de Métricas de Auditoría y Producción
 #'
 #' @description
@@ -164,6 +340,14 @@ fetch_auditoria_legacy <- function(pool, encuesta_id) {
 #' @param excluir_brigadas Vector de caracteres. Nombres o patrones de brigadas a excluir del reporte. Por defecto `NULL`.
 #' @param filtrar_historicos Lógico. Si `TRUE`, los promedios históricos se calculan solo con los IDs del RDS acumulado, que también se actualiza con los registros de esta semana. Por defecto `FALSE`.
 #' @param path_historicos Ruta al archivo `.rds` que acumula los IDs históricos. Requerido cuando `filtrar_historicos = TRUE`. Por defecto `NULL`.
+#' @param fuente_auditoria Caracter. Fuente de las evaluaciones de auditoría: `"legacy"`
+#'   (por defecto) lee `EvaluacionRegistro`, tal como siempre; `"bot"` lee únicamente las
+#'   auditorías automáticas de `ResultadoAuditoriaBot` para la semana en curso (pensado para
+#'   el reporte semanal de encuestas ya migradas al bot); `"combinar"` une el histórico
+#'   completo de ambas fuentes, privilegiando el bot cuando un mismo `RegistroId` existe en
+#'   las dos (uso para reportes que deben conservar continuidad histórica, p. ej. el de
+#'   Lorenia). No todas las encuestas tienen datos en `ResultadoAuditoriaBot`; usar `"bot"`
+#'   o `"combinar"` solo cuando se confirmó que la encuesta ya se audita con el bot.
 #'
 #' @return Una `lista` con tres elementos:
 #' \describe{
@@ -185,6 +369,7 @@ fetch_auditoria_legacy <- function(pool, encuesta_id) {
 #' @importFrom jsonlite fromJSON
 #' @importFrom purrr map
 #' @importFrom readr read_rds write_rds
+#' @importFrom dplyr sql
 #'
 #' @examples
 #' \dontrun{
@@ -209,7 +394,9 @@ generar_reporte_metricas <- function(pool,
                                      simular_domingo = FALSE,
                                      excluir_brigadas = NULL,
                                      filtrar_historicos = FALSE,
-                                     path_historicos = NULL) {
+                                     path_historicos = NULL,
+                                     fuente_auditoria = c("legacy", "bot", "combinar")) {
+  fuente_auditoria <- match.arg(fuente_auditoria)
 
   # --- 1. LÓGICA DE FECHAS ---
   corte_dt <- as.Date(corte)
@@ -292,7 +479,7 @@ generar_reporte_metricas <- function(pool,
                      fecha_ultimo_registro = fecha_ultimo_reg_hist)
 
   # --- 5. PROCESAMIENTO DE AUDITORÍAS ---
-  evaluacion_raw <- fetch_auditoria_legacy(pool, encuesta_id)
+  evaluacion_raw <- obtener_evaluaciones(pool, encuesta_id, fuente_auditoria, fecha_inicio_au, fecha_fin_au)
 
   evaluacion_sem <- evaluacion_raw |> dplyr::filter(fecha >= fecha_inicio_au & fecha <= fecha_fin_au)
 

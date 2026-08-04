@@ -17,7 +17,8 @@ generar_reporte_metricas(
   simular_domingo = FALSE,
   excluir_brigadas = NULL,
   filtrar_historicos = FALSE,
-  path_historicos = NULL
+  path_historicos = NULL,
+  fuente_auditoria = c("legacy", "bot", "combinar")
 )
 
 generar_metricas_auditoria(
@@ -32,7 +33,8 @@ generar_metricas_auditoria(
   simular_domingo = FALSE,
   excluir_brigadas = NULL,
   filtrar_historicos = FALSE,
-  path_historicos = NULL
+  path_historicos = NULL,
+  fuente_auditoria = c("legacy", "bot", "combinar")
 )
 }
 \arguments{
@@ -59,6 +61,15 @@ generar_metricas_auditoria(
 \item{filtrar_historicos}{Lógico. Si \code{TRUE}, los promedios históricos se calculan solo con los IDs del RDS acumulado, que también se actualiza con los registros de esta semana. Por defecto \code{FALSE}.}
 
 \item{path_historicos}{Ruta al archivo \code{.rds} que acumula los IDs históricos. Requerido cuando \code{filtrar_historicos = TRUE}. Por defecto \code{NULL}.}
+
+\item{fuente_auditoria}{Caracter. Fuente de las evaluaciones de auditoría: \code{"legacy"}
+(por defecto) lee \code{EvaluacionRegistro}, tal como siempre; \code{"bot"} lee únicamente las
+auditorías automáticas de \code{ResultadoAuditoriaBot} para la semana en curso (pensado para
+el reporte semanal de encuestas ya migradas al bot); \code{"combinar"} une el histórico
+completo de ambas fuentes, privilegiando el bot cuando un mismo \code{RegistroId} existe en
+las dos (uso para reportes que deben conservar continuidad histórica, p. ej. el de
+Lorenia). No todas las encuestas tienen datos en \code{ResultadoAuditoriaBot}; usar \code{"bot"}
+o \code{"combinar"} solo cuando se confirmó que la encuesta ya se audita con el bot.}
 }
 \value{
 Una \code{lista} con tres elementos:

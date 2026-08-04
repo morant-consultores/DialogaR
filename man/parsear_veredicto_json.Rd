@@ -16,6 +16,10 @@ El data frame de entrada con los campos del JSON expandidos como columnas.
 }
 \description{
 Aplica \code{jsonlite::fromJSON} sobre una columna de texto JSON y expande sus campos
-como columnas del data frame.
+como columnas del data frame. Usado tanto para el veredicto legado
+(\code{EvaluacionRegistro.Resultado}) como para el veredicto del bot
+(\code{ResultadoAuditoriaBot.VeredictoJson} y \code{RevisionAuditoriaBot.VeredictoCorregido}),
+que comparten el mismo esquema de campos (\code{dictamenFinal}, \code{totalEvaluacion},
+\code{observaciones}, entre otros).
 }
 \keyword{internal}
