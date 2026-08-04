@@ -25,7 +25,7 @@
 #   - Credenciales en .Renviron
 # =========================================================================
 
-library(DialogaR)
+devtools::load_all()
 
 if (!"fuente_auditoria" %in% names(formals(generar_reporte_metricas))) {
   stop(
@@ -54,11 +54,15 @@ if (length(faltantes) > 0) {
 # 2. PARÁMETROS
 # =========================================================================
 
-encuesta_id             <- 285L
-fecha_inicio_auditoria  <- as.Date("2026-07-25")
-fecha_fin_auditoria     <- as.Date("2026-07-31")
-corte                   <- fecha_fin_auditoria
-excluir_brigadas        <- NULL
+encuesta_id <- 285L
+fecha_inicio_auditoria <- as.Date("2026-07-25")
+fecha_fin_auditoria <- as.Date("2026-07-31")
+corte <- fecha_fin_auditoria
+excluir_brigadas <- NULL
+
+# La ventana de "efectivos" (producción) es por defecto la misma semana que la de
+# auditoría (fecha_inicio_auditoria/fecha_fin_auditoria). Si en algún momento se necesita
+# que difiera, pasar fecha_inicio_efectivos/fecha_fin_efectivos a generar_reporte_metricas().
 
 # Ruta del acumulado histórico (RDS) del reporte de Lorenia. Ajustar antes
 # de ejecutar si el reporte debe mantener continuidad con corridas previas;
@@ -75,21 +79,23 @@ pool <- conectar_base_datos()
 # 4. GENERAR REPORTE DE AUDITORÍA
 # =========================================================================
 
-cli::cli_h1("Generando reporte de auditoría: {fecha_inicio_auditoria} a {fecha_fin_auditoria}")
+cli::cli_h1(
+  "Generando reporte de auditoría: {fecha_inicio_auditoria} a {fecha_fin_auditoria}"
+)
 
 reporte_auditoria <- generar_reporte_metricas(
-  pool                    = pool,
-  insumos                 = insumos,
-  bd_completa             = bd_completa,
-  bd_aux                  = bd_aux,
-  encuesta_id             = encuesta_id,
-  corte                   = corte,
-  fecha_inicio_auditoria  = fecha_inicio_auditoria,
-  fecha_fin_auditoria     = fecha_fin_auditoria,
-  excluir_brigadas        = excluir_brigadas,
-  filtrar_historicos      = !is.null(path_historicos),
-  path_historicos         = path_historicos,
-  fuente_auditoria        = "combinar"
+  pool = pool,
+  insumos = insumos,
+  bd_completa = bd_completa,
+  bd_aux = bd_aux,
+  encuesta_id = encuesta_id,
+  corte = corte,
+  fecha_inicio_auditoria = fecha_inicio_auditoria,
+  fecha_fin_auditoria = fecha_fin_auditoria,
+  excluir_brigadas = excluir_brigadas,
+  filtrar_historicos = !is.null(path_historicos),
+  path_historicos = path_historicos,
+  fuente_auditoria = "combinar"
 )
 
 cli::cli_alert_success(
@@ -104,7 +110,9 @@ wb <- crear_workbook_auditoria(reporte_auditoria)
 
 nombre_archivo <- sprintf(
   "Reporte_Auditoria_%s_%s_a_%s.xlsx",
-  encuesta_id, fecha_inicio_auditoria, fecha_fin_auditoria
+  encuesta_id,
+  fecha_inicio_auditoria,
+  fecha_fin_auditoria
 )
 ruta_salida <- file.path(getwd(), nombre_archivo)
 
