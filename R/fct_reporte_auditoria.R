@@ -340,6 +340,12 @@ obtener_evaluaciones <- function(pool, encuesta_id, fuente_auditoria, fecha_inic
 #' @param excluir_brigadas Vector de caracteres. Nombres o patrones de brigadas a excluir del reporte. Por defecto `NULL`.
 #' @param filtrar_historicos Lógico. Si `TRUE`, los promedios históricos se calculan solo con los IDs del RDS acumulado, que también se actualiza con los registros de esta semana. Por defecto `FALSE`.
 #' @param path_historicos Ruta al archivo `.rds` que acumula los IDs históricos. Requerido cuando `filtrar_historicos = TRUE`. Por defecto `NULL`.
+#' @param fecha_inicio_auditoria,fecha_fin_auditoria Fecha. Cuando ambos se indican, reemplazan
+#'   el cálculo automático del rango de auditoría (que normalmente es la semana natural
+#'   lunes-domingo que contiene a `corte`), permitiendo un rango arbitrario — por ejemplo,
+#'   para reconstruir un reporte histórico de una semana operativa que no inicia en lunes.
+#'   `corte` sigue siendo obligatorio pero deja de determinar el rango de auditoría cuando
+#'   se usan estos parámetros. Por defecto `NULL` (comportamiento estándar).
 #' @param fuente_auditoria Caracter. Fuente de las evaluaciones de auditoría: `"legacy"`
 #'   (por defecto) lee `EvaluacionRegistro`, tal como siempre; `"bot"` lee únicamente las
 #'   auditorías automáticas de `ResultadoAuditoriaBot` para la semana en curso (pensado para
@@ -395,8 +401,15 @@ generar_reporte_metricas <- function(pool,
                                      excluir_brigadas = NULL,
                                      filtrar_historicos = FALSE,
                                      path_historicos = NULL,
+                                     fecha_inicio_auditoria = NULL,
+                                     fecha_fin_auditoria = NULL,
                                      fuente_auditoria = c("legacy", "bot", "combinar")) {
   fuente_auditoria <- match.arg(fuente_auditoria)
+
+  rango_auditoria_manual <- !is.null(fecha_inicio_auditoria) && !is.null(fecha_fin_auditoria)
+  if (xor(is.null(fecha_inicio_auditoria), is.null(fecha_fin_auditoria))) {
+    cli::cli_abort("fecha_inicio_auditoria y fecha_fin_auditoria deben indicarse juntos.")
+  }
 
   # --- 1. LÓGICA DE FECHAS ---
   corte_dt <- as.Date(corte)
@@ -408,8 +421,17 @@ generar_reporte_metricas <- function(pool,
     cli::cli_abort("simular_domingo = TRUE pero fecha_fin_au ({fecha_fin_au}) no es domingo.")
   }
 
-  fecha_inicio_au <- lubridate::floor_date(corte_dt, unit = "week", week_start = 1)
-  fecha_fin_au    <- corte_dt
+  if (rango_auditoria_manual) {
+    fecha_inicio_au <- as.Date(fecha_inicio_auditoria)
+    fecha_fin_au    <- as.Date(fecha_fin_auditoria)
+    if (fecha_inicio_au > fecha_fin_au) {
+      cli::cli_abort("fecha_inicio_auditoria ({fecha_inicio_au}) no puede ser posterior a fecha_fin_auditoria ({fecha_fin_au}).")
+    }
+    cli::cli_alert_info("Rango de auditoría manual: {fecha_inicio_au} a {fecha_fin_au} (ignora corte para este cálculo)")
+  } else {
+    fecha_inicio_au <- lubridate::floor_date(corte_dt, unit = "week", week_start = 1)
+    fecha_fin_au    <- corte_dt
+  }
   fecha_fin_ef    <- encontrar_fecha_exacta(fecha_inicio_au, fin_semanal)
   fecha_inicio_ef <- encontrar_fecha_exacta(fecha_fin_ef, inicio_semanal)
   rango_fechas    <- seq.Date(fecha_inicio_ef, fecha_fin_ef, by = "day")

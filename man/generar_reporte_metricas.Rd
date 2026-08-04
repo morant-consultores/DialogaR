@@ -18,6 +18,8 @@ generar_reporte_metricas(
   excluir_brigadas = NULL,
   filtrar_historicos = FALSE,
   path_historicos = NULL,
+  fecha_inicio_auditoria = NULL,
+  fecha_fin_auditoria = NULL,
   fuente_auditoria = c("legacy", "bot", "combinar")
 )
 
@@ -34,6 +36,8 @@ generar_metricas_auditoria(
   excluir_brigadas = NULL,
   filtrar_historicos = FALSE,
   path_historicos = NULL,
+  fecha_inicio_auditoria = NULL,
+  fecha_fin_auditoria = NULL,
   fuente_auditoria = c("legacy", "bot", "combinar")
 )
 }
@@ -61,6 +65,13 @@ generar_metricas_auditoria(
 \item{filtrar_historicos}{Lógico. Si \code{TRUE}, los promedios históricos se calculan solo con los IDs del RDS acumulado, que también se actualiza con los registros de esta semana. Por defecto \code{FALSE}.}
 
 \item{path_historicos}{Ruta al archivo \code{.rds} que acumula los IDs históricos. Requerido cuando \code{filtrar_historicos = TRUE}. Por defecto \code{NULL}.}
+
+\item{fecha_inicio_auditoria, fecha_fin_auditoria}{Fecha. Cuando ambos se indican, reemplazan
+el cálculo automático del rango de auditoría (que normalmente es la semana natural
+lunes-domingo que contiene a \code{corte}), permitiendo un rango arbitrario — por ejemplo,
+para reconstruir un reporte histórico de una semana operativa que no inicia en lunes.
+\code{corte} sigue siendo obligatorio pero deja de determinar el rango de auditoría cuando
+se usan estos parámetros. Por defecto \code{NULL} (comportamiento estándar).}
 
 \item{fuente_auditoria}{Caracter. Fuente de las evaluaciones de auditoría: \code{"legacy"}
 (por defecto) lee \code{EvaluacionRegistro}, tal como siempre; \code{"bot"} lee únicamente las
