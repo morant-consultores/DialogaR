@@ -75,6 +75,71 @@ ensamblar_estructura <- function(stats_df, bd_aux_clean, coord_nums) {
     dplyr::distinct()
 }
 
+#' Parsear columna JSON de veredicto de auditoría
+#'
+#' @description
+#' Aplica `jsonlite::fromJSON` sobre una columna de texto JSON y expande sus campos
+#' como columnas del data frame.
+#'
+#' @param df Data frame que contiene la columna JSON a parsear.
+#' @param col_json Caracter. Nombre de la columna de texto JSON.
+#'
+#' @return El data frame de entrada con los campos del JSON expandidos como columnas.
+#'
+#' @importFrom purrr map
+#' @importFrom jsonlite fromJSON
+#' @importFrom tidyr unnest_wider
+#' @keywords internal
+parsear_veredicto_json <- function(df, col_json) {
+  df |>
+    dplyr::mutate(
+      json_parseado = purrr::map(.data[[col_json]], \(x) {
+        lista_cruda <- jsonlite::fromJSON(x)
+        lista_limpia <- purrr::map(lista_cruda, \(item) {
+          if (length(item) == 0) return(NA)
+          if (length(item) > 1) return(list(item))
+          return(item)
+        })
+        tibble::as_tibble_row(lista_limpia)
+      })
+    ) |>
+    tidyr::unnest_wider(json_parseado)
+}
+
+#' Obtener auditorías (fuente legado: EvaluacionRegistro)
+#'
+#' @description
+#' Extrae todo el histórico de evaluaciones de auditoría de la(s) encuesta(s) indicada(s)
+#' desde `EvaluacionRegistro`, cruzando con `Registros` para obtener `usuario_num`.
+#' No aplica filtro de fecha: el llamador decide qué ventana usar.
+#'
+#' @param pool Objeto de conexión `pool`.
+#' @param encuesta_id Vector. Identificador(es) de encuesta.
+#'
+#' @return Tibble normalizado con columnas `RegistroId`, `usuario_num`, `fecha`,
+#'   `dictamenFinal`, `totalEvaluacion`, `observaciones`.
+#'
+#' @importFrom lubridate with_tz
+#' @keywords internal
+fetch_auditoria_legacy <- function(pool, encuesta_id) {
+  # registros_id se extrae directamente de la tabla Registros filtrada por encuesta_id,
+  # lo que garantiza que el join con EvaluacionRegistro ocurra en la base de datos (pushdown)
+  # y evita traer registros de otras encuestas.
+  registros_id <- dplyr::tbl(pool, "Registros") |>
+    dplyr::filter(EncuestaId %in% encuesta_id) |>
+    dplyr::transmute(id = Id, usuario_num = UsuarioNum)
+
+  dplyr::tbl(pool, "EvaluacionRegistro") |>
+    dplyr::inner_join(registros_id, by = dplyr::join_by(RegistroId == id)) |>
+    dplyr::collect() |>
+    dplyr::mutate(
+      fecha_hora_cdmx = lubridate::with_tz(Fecha, tzone = "America/Mexico_City"),
+      fecha = as.Date(fecha_hora_cdmx)
+    ) |>
+    parsear_veredicto_json("Resultado") |>
+    dplyr::transmute(RegistroId, usuario_num, fecha, dictamenFinal, totalEvaluacion, observaciones)
+}
+
 #' Generar Reporte de Métricas de Auditoría y Producción
 #'
 #' @description
@@ -227,30 +292,7 @@ generar_reporte_metricas <- function(pool,
                      fecha_ultimo_registro = fecha_ultimo_reg_hist)
 
   # --- 5. PROCESAMIENTO DE AUDITORÍAS ---
-  # registros_id_hist se extrae directamente de la tabla Registros filtrada por encuesta_id,
-  # lo que garantiza que el join con EvaluacionRegistro ocurra en la base de datos (pushdown)
-  # y evita traer registros de otras encuestas.
-  registros_id_hist <- dplyr::tbl(pool, "Registros") |>
-    dplyr::filter(EncuestaId %in% encuesta_id) |>
-    dplyr::transmute(id = Id, usuario_num = UsuarioNum)
-
-  evaluacion_raw <- dplyr::tbl(pool, "EvaluacionRegistro") |>
-    dplyr::inner_join(registros_id_hist, by = dplyr::join_by(RegistroId == id)) |>
-    dplyr::collect() |>
-    dplyr::mutate(
-      json_parseado = purrr::map(Resultado, \(x) {
-        lista_cruda <- jsonlite::fromJSON(x)
-        lista_limpia <- purrr::map(lista_cruda, \(item) {
-          if (length(item) == 0) return(NA)
-          if (length(item) > 1) return(list(item))
-          return(item)
-        })
-        tibble::as_tibble_row(lista_limpia)
-      }),
-      fecha_hora_cdmx = lubridate::with_tz(Fecha, tzone = "America/Mexico_City"),
-      fecha = as.Date(fecha_hora_cdmx)
-    ) |>
-    tidyr::unnest_wider(json_parseado)
+  evaluacion_raw <- fetch_auditoria_legacy(pool, encuesta_id)
 
   evaluacion_sem <- evaluacion_raw |> dplyr::filter(fecha >= fecha_inicio_au & fecha <= fecha_fin_au)
 
