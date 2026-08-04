@@ -10,38 +10,6 @@
 # - Los datos resultantes se consideran activos de información tipo A
 # -------------------------------------------------------------------------
 
-#' Encontrar fecha exacta hacia el pasado basada en un día de la semana
-#'
-#' @description
-#' Calcula de forma retrospectiva la fecha de un día de la semana específico
-#' (ej. "lunes", "domingo") más cercano en el pasado con respecto a una fecha de referencia.
-#' Si la fecha de referencia coincide con el día objetivo, retrocede una semana completa (7 días).
-#'
-#' @param referencia Objeto de clase \code{Date}. La fecha base a partir de la cual se buscará hacia atrás.
-#' @param nombre_dia Caracter. El nombre del día de la semana que se desea encontrar (ej. "lunes", "domingo", "miércoles"). No distingue mayúsculas ni acentos.
-#'
-#' @return Un objeto de clase \code{Date} con la fecha exacta calculada.
-#'
-#' @seealso \code{\link[lubridate]{wday}}
-#'
-#' @examples
-#' \dontrun{
-#' encontrar_fecha_exacta(as.Date("2026-05-15"), "lunes")
-#' }
-#'
-#' @importFrom lubridate wday
-#' @keywords internal
-encontrar_fecha_exacta <- function(referencia, nombre_dia) {
-  dias_ref <- c("lunes" = 1, "martes" = 2, "miercoles" = 3, "miércoles" = 3,
-                "jueves" = 4, "viernes" = 5, "sabado" = 6, "sábado" = 6, "domingo" = 7)
-  target_num <- dias_ref[tolower(nombre_dia)]
-  actual_num <- lubridate::wday(referencia, week_start = 1)
-  diff <- actual_num - target_num
-  if (diff < 0) diff <- diff + 7
-  if (diff == 0) diff <- 7
-  return(referencia - diff)
-}
-
 #' Ensamblar estructura operativa con métricas de producción
 #'
 #' @description
@@ -324,9 +292,10 @@ obtener_evaluaciones <- function(pool, encuesta_id, fuente_auditoria, fecha_inic
 #' base de datos y genera estructuras listas para reporte. Opcionalmente actualiza y
 #' filtra un archivo histórico local en formato RDS.
 #'
-#' Este reporte trabaja con dos periodos de tiempo: la columna `efectivos` refleja
-#' la semana inmediata previa, mientras que los valores de auditoría corresponden a
-#' la semana natural corriente (lunes a domingo).
+#' Este reporte trabaja con dos periodos de tiempo, `efectivos` (producción) y
+#' `auditoría` (evaluaciones). Por defecto ambos son la misma semana; use
+#' `fecha_inicio_efectivos`/`fecha_fin_efectivos` si se necesita que la ventana de
+#' producción difiera de la de auditoría.
 #'
 #' @param pool Objeto de conexión `pool` a la base de datos relacional.
 #' @param insumos Lista con catálogos base; debe incluir `cat$usuarios` con el rol de los integrantes.
@@ -334,8 +303,6 @@ obtener_evaluaciones <- function(pool, encuesta_id, fuente_auditoria, fecha_inic
 #' @param bd_aux Data frame o tibble con la estructura operativa (voceros, coordinadores, supervisores y brigadas).
 #' @param encuesta_id Vector. Identificador(es) de encuesta para filtrar la tabla `Registros` en la base de datos.
 #' @param corte Fecha o string (`YYYY-MM-DD`) que define el límite superior para la auditoría semanal.
-#' @param inicio_semanal Caracter. Día de inicio del periodo efectivo (ej. `"lunes"`). Por defecto `"lunes"`.
-#' @param fin_semanal Caracter. Día de cierre del periodo efectivo (ej. `"domingo"`). Por defecto `"domingo"`.
 #' @param simular_domingo Lógico. Si `TRUE`, ajusta el corte al domingo de esa misma semana. Por defecto `FALSE`.
 #' @param excluir_brigadas Vector de caracteres. Nombres o patrones de brigadas a excluir del reporte. Por defecto `NULL`.
 #' @param filtrar_historicos Lógico. Si `TRUE`, los promedios históricos se calculan solo con los IDs del RDS acumulado, que también se actualiza con los registros de esta semana. Por defecto `FALSE`.
@@ -346,6 +313,10 @@ obtener_evaluaciones <- function(pool, encuesta_id, fuente_auditoria, fecha_inic
 #'   para reconstruir un reporte histórico de una semana operativa que no inicia en lunes.
 #'   `corte` sigue siendo obligatorio pero deja de determinar el rango de auditoría cuando
 #'   se usan estos parámetros. Por defecto `NULL` (comportamiento estándar).
+#' @param fecha_inicio_efectivos,fecha_fin_efectivos Fecha. Cuando ambos se indican, fijan
+#'   la ventana de producción (`efectivos`) de forma independiente de la ventana de
+#'   auditoría. Por defecto `NULL`, en cuyo caso la ventana de efectivos es la misma que
+#'   la de auditoría (`fecha_inicio_au`/`fecha_fin_au`).
 #' @param fuente_auditoria Caracter. Fuente de las evaluaciones de auditoría: `"legacy"`
 #'   (por defecto) lee `EvaluacionRegistro`, tal como siempre; `"bot"` lee únicamente las
 #'   auditorías automáticas de `ResultadoAuditoriaBot` para la semana en curso (pensado para
@@ -395,20 +366,25 @@ generar_reporte_metricas <- function(pool,
                                      bd_aux,
                                      encuesta_id,
                                      corte,
-                                     inicio_semanal = "lunes",
-                                     fin_semanal = "domingo",
                                      simular_domingo = FALSE,
                                      excluir_brigadas = NULL,
                                      filtrar_historicos = FALSE,
                                      path_historicos = NULL,
                                      fecha_inicio_auditoria = NULL,
                                      fecha_fin_auditoria = NULL,
+                                     fecha_inicio_efectivos = NULL,
+                                     fecha_fin_efectivos = NULL,
                                      fuente_auditoria = c("legacy", "bot", "combinar")) {
   fuente_auditoria <- match.arg(fuente_auditoria)
 
   rango_auditoria_manual <- !is.null(fecha_inicio_auditoria) && !is.null(fecha_fin_auditoria)
   if (xor(is.null(fecha_inicio_auditoria), is.null(fecha_fin_auditoria))) {
     cli::cli_abort("fecha_inicio_auditoria y fecha_fin_auditoria deben indicarse juntos.")
+  }
+
+  rango_efectivos_manual <- !is.null(fecha_inicio_efectivos) && !is.null(fecha_fin_efectivos)
+  if (xor(is.null(fecha_inicio_efectivos), is.null(fecha_fin_efectivos))) {
+    cli::cli_abort("fecha_inicio_efectivos y fecha_fin_efectivos deben indicarse juntos.")
   }
 
   # --- 1. LÓGICA DE FECHAS ---
@@ -432,8 +408,17 @@ generar_reporte_metricas <- function(pool,
     fecha_inicio_au <- lubridate::floor_date(corte_dt, unit = "week", week_start = 1)
     fecha_fin_au    <- corte_dt
   }
-  fecha_fin_ef    <- encontrar_fecha_exacta(fecha_inicio_au, fin_semanal)
-  fecha_inicio_ef <- encontrar_fecha_exacta(fecha_fin_ef, inicio_semanal)
+  if (rango_efectivos_manual) {
+    fecha_inicio_ef <- as.Date(fecha_inicio_efectivos)
+    fecha_fin_ef    <- as.Date(fecha_fin_efectivos)
+    if (fecha_inicio_ef > fecha_fin_ef) {
+      cli::cli_abort("fecha_inicio_efectivos ({fecha_inicio_ef}) no puede ser posterior a fecha_fin_efectivos ({fecha_fin_ef}).")
+    }
+  } else {
+    # Por defecto, la ventana de efectivos es la misma semana que la de auditoría.
+    fecha_inicio_ef <- fecha_inicio_au
+    fecha_fin_ef    <- fecha_fin_au
+  }
   rango_fechas    <- seq.Date(fecha_inicio_ef, fecha_fin_ef, by = "day")
 
   if (fecha_fin_ef > fecha_fin_au) {
