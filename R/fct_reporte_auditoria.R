@@ -78,38 +78,111 @@ parsear_veredicto_json <- function(df, col_json) {
     tidyr::unnest_wider(json_parseado)
 }
 
-#' Obtener auditorías (fuente legado: EvaluacionRegistro)
+#' Obtener diálogos efectivos de una encuesta, opcionalmente en una ventana de fechas
 #'
 #' @description
-#' Extrae todo el histórico de evaluaciones de auditoría de la(s) encuesta(s) indicada(s)
-#' desde `EvaluacionRegistro`, cruzando con `Registros` para obtener `usuario_num`.
-#' No aplica filtro de fecha: el llamador decide qué ventana usar.
+#' Extrae `RegistroId`/`usuario_num`/`fecha` de `Registros` para la(s) encuesta(s)
+#' indicada(s), filtrando `TipoRegistro == "Efectivo"` (el mismo criterio que
+#' `desglose == "Efectivo"` en `bd_completa`). `fecha` se deriva de `Registros.FechaInicio`
+#' (cuándo ocurrió el diálogo, ya en horario local CDMX) — **no** de la fecha en la que el
+#' diálogo fue auditado.
+#'
+#' Esta distinción es crítica: tanto el bot como la verificación humana auditan en lotes,
+#' frecuentemente días después de que el diálogo ocurrió (un diálogo del 25 de julio puede
+#' auditarse hasta el 3 de agosto). Filtrar por la fecha de la auditoría en vez de la fecha
+#' del diálogo excluye silenciosamente diálogos de la semana que sí fueron auditados, solo
+#' que más tarde.
 #'
 #' @param pool Objeto de conexión `pool`.
 #' @param encuesta_id Vector. Identificador(es) de encuesta.
+#' @param fecha_inicio Fecha. Límite inferior (inclusive), en horario CDMX, para
+#'   `Registros.FechaInicio`. `NULL` (por defecto) para no filtrar (histórico completo).
+#' @param fecha_fin Fecha. Límite superior (inclusive), en horario CDMX, para
+#'   `Registros.FechaInicio`. `NULL` (por defecto) para no filtrar.
+#'
+#' @return Tibble con columnas `RegistroId`, `usuario_num`, `fecha`.
+#'
+#' @importFrom lubridate with_tz
+#' @keywords internal
+registros_efectivos <- function(pool, encuesta_id, fecha_inicio = NULL, fecha_fin = NULL) {
+  q <- dplyr::tbl(pool, "Registros") |>
+    dplyr::filter(EncuestaId %in% encuesta_id, TipoRegistro == "Efectivo")
+
+  if (!is.null(fecha_inicio) && !is.null(fecha_fin)) {
+    # FechaInicio se almacena en UTC; se construyen los límites como instantes con tz
+    # CDMX (día natural local) y se dejan que dbplyr los traduzca a su equivalente UTC
+    # para la comparación SQL contra la columna remota.
+    fecha_inicio_dt <- as.POSIXct(paste(fecha_inicio, "00:00:00"), tz = "America/Mexico_City")
+    fecha_fin_exclusiva_dt <- as.POSIXct(paste(fecha_fin + 1, "00:00:00"), tz = "America/Mexico_City")
+    q <- q |> dplyr::filter(FechaInicio >= fecha_inicio_dt, FechaInicio < fecha_fin_exclusiva_dt)
+  }
+
+  q |>
+    dplyr::transmute(RegistroId = Id, usuario_num = UsuarioNum, FechaInicio) |>
+    dplyr::collect() |>
+    dplyr::mutate(
+      fecha_hora_cdmx = lubridate::with_tz(lubridate::as_datetime(FechaInicio), tzone = "America/Mexico_City"),
+      fecha = as.Date(fecha_hora_cdmx, tz = "America/Mexico_City")
+    ) |>
+    dplyr::select(RegistroId, usuario_num, fecha)
+}
+
+#' Obtener auditorías (fuente legado: EvaluacionRegistro)
+#'
+#' @description
+#' Cruza los diálogos efectivos ya resueltos (`registros`, ver \code{\link{registros_efectivos}})
+#' con `EvaluacionRegistro` para obtener su veredicto. `fecha` en el resultado es la del
+#' diálogo (heredada de `registros`), no la de la auditoría. Algunas encuestas no tienen
+#' tabla `EvaluacionRegistro`, o la tienen pero sin filas ligadas a sus `RegistroId`
+#' (nunca usaron el flujo legado, o ya migraron por completo al bot); en ambos casos
+#' retorna un tibble vacío en vez de fallar.
+#'
+#' @param pool Objeto de conexión `pool`.
+#' @param registros Tibble con columnas `RegistroId`, `usuario_num`, `fecha` — ver
+#'   \code{\link{registros_efectivos}}.
 #'
 #' @return Tibble normalizado con columnas `RegistroId`, `usuario_num`, `fecha`,
 #'   `dictamenFinal`, `totalEvaluacion`, `observaciones`.
 #'
-#' @importFrom lubridate with_tz
 #' @keywords internal
-fetch_auditoria_legacy <- function(pool, encuesta_id) {
-  # registros_id se extrae directamente de la tabla Registros filtrada por encuesta_id,
-  # lo que garantiza que el join con EvaluacionRegistro ocurra en la base de datos (pushdown)
-  # y evita traer registros de otras encuestas.
-  registros_id <- dplyr::tbl(pool, "Registros") |>
-    dplyr::filter(EncuestaId %in% encuesta_id) |>
-    dplyr::transmute(id = Id, usuario_num = UsuarioNum)
+fetch_auditoria_legacy <- function(pool, registros) {
+  vacio <- tibble::tibble(RegistroId = integer(), usuario_num = character(), fecha = as.Date(character()),
+                          dictamenFinal = character(), totalEvaluacion = character(),
+                          observaciones = character())
+  if (nrow(registros) == 0) return(vacio)
+  if (!existe_tabla(pool, "EvaluacionRegistro")) return(vacio)
 
-  dplyr::tbl(pool, "EvaluacionRegistro") |>
-    dplyr::inner_join(registros_id, by = dplyr::join_by(RegistroId == id)) |>
-    dplyr::collect() |>
-    dplyr::mutate(
-      fecha_hora_cdmx = lubridate::with_tz(Fecha, tzone = "America/Mexico_City"),
-      fecha = as.Date(fecha_hora_cdmx)
-    ) |>
+  datos <- dplyr::tbl(pool, "EvaluacionRegistro") |>
+    dplyr::filter(RegistroId %in% !!registros$RegistroId) |>
+    dplyr::select(RegistroId, Resultado) |>
+    dplyr::collect()
+
+  # Sin filas de EvaluacionRegistro ligadas a estos RegistroId (encuesta sin auditoría
+  # legado, p. ej. ya migrada por completo al bot), unnest_wider() sobre un data frame
+  # vacío no puede inferir las columnas del JSON (dictamenFinal, totalEvaluacion,
+  # observaciones), lo que rompería el transmute() de abajo.
+  if (nrow(datos) == 0) return(vacio)
+
+  datos |>
     parsear_veredicto_json("Resultado") |>
+    dplyr::inner_join(registros, by = "RegistroId") |>
     dplyr::transmute(RegistroId, usuario_num, fecha, dictamenFinal, totalEvaluacion, observaciones)
+}
+
+#' Detectar si una tabla existe en la conexión activa
+#'
+#' @description
+#' Algunas encuestas/proyectos no tienen tabla `EvaluacionRegistro` (nunca usaron el
+#' flujo de auditoría legado). Consultarla directamente con `dplyr::tbl()` en esos casos
+#' rompe el pipeline; esta función permite verificar su existencia antes.
+#'
+#' @param pool Objeto de conexión `pool` o una conexión `DBI` directa.
+#' @param nombre_tabla Caracter. Nombre de la tabla a verificar.
+#'
+#' @return Lógico.
+#' @keywords internal
+existe_tabla <- function(pool, nombre_tabla) {
+  DBI::dbExistsTable(pool, nombre_tabla)
 }
 
 #' Detectar si la conexión activa es SQL Server
@@ -135,31 +208,28 @@ mssql_backend <- function(pool) {
 #' Obtener auditorías (fuente bot: ResultadoAuditoriaBot)
 #'
 #' @description
-#' Extrae las auditorías automáticas del bot para la(s) encuesta(s) indicada(s), colapsando
-#' re-auditorías del mismo registro (vale la última pasada del bot) y aplicando la corrección
-#' humana de `RevisionAuditoriaBot` cuando existe (`VeredictoCorregido` reemplaza el veredicto
-#' original del bot para ese registro).
-#'
-#' Cuando se indican `fecha_inicio`/`fecha_fin`, el filtro se empuja a la consulta SQL —
-#' pensado para el reporte semanal, que solo necesita la semana inmediata anterior y no debe
-#' traer el histórico completo de auditorías del bot. Cuando ambos son `NULL`, se trae el
-#' histórico completo (uso para reportes que combinan fuentes, ver `fuente_auditoria = "combinar"`
-#' en \code{\link{generar_reporte_metricas}}).
+#' Cruza los diálogos efectivos ya resueltos (`registros`, ver \code{\link{registros_efectivos}})
+#' con `ResultadoAuditoriaBot` vía `RegistroId`, colapsando re-auditorías del mismo registro
+#' (vale la última pasada del bot) y aplicando la corrección humana de `RevisionAuditoriaBot`
+#' cuando existe (`VeredictoCorregido` reemplaza el veredicto original del bot para esa
+#' auditoría). `fecha` en el resultado es la del diálogo (heredada de `registros`), no la de
+#' la auditoría — el bot audita en lotes, frecuentemente días después de que el diálogo ocurrió.
 #'
 #' @param pool Objeto de conexión `pool`.
-#' @param encuesta_id Vector. Identificador(es) de encuesta.
-#' @param fecha_inicio Fecha. Límite inferior (inclusive), en horario CDMX, para
-#'   `ResultadoAuditoriaBot.Fecha`. `NULL` (por defecto) para no filtrar.
-#' @param fecha_fin Fecha. Límite superior (inclusive), en horario CDMX, para
-#'   `ResultadoAuditoriaBot.Fecha`. `NULL` (por defecto) para no filtrar.
+#' @param registros Tibble con columnas `RegistroId`, `usuario_num`, `fecha` — ver
+#'   \code{\link{registros_efectivos}}.
 #'
 #' @return Tibble normalizado con columnas `RegistroId`, `usuario_num`, `fecha`,
 #'   `dictamenFinal`, `totalEvaluacion`, `observaciones`.
 #'
 #' @importFrom tibble tibble
-#' @importFrom lubridate with_tz
 #' @keywords internal
-fetch_auditoria_bot <- function(pool, encuesta_id, fecha_inicio = NULL, fecha_fin = NULL) {
+fetch_auditoria_bot <- function(pool, registros) {
+  vacio <- tibble::tibble(RegistroId = integer(), usuario_num = character(), fecha = as.Date(character()),
+                          dictamenFinal = character(), totalEvaluacion = character(),
+                          observaciones = character())
+  if (nrow(registros) == 0) return(vacio)
+
   # SQL Server (vía ODBC/FreeTDS) trunca columnas TEXT/NTEXT largas si no se castean
   # explícitamente a NVARCHAR(MAX); ese CAST no es válido en otros backends (p. ej. SQLite
   # en pruebas), por lo que solo se aplica cuando la conexión real es SQL Server.
@@ -171,37 +241,12 @@ fetch_auditoria_bot <- function(pool, encuesta_id, fecha_inicio = NULL, fecha_fi
     }
   }
 
-  lotes <- dplyr::tbl(pool, "LoteAuditoria") |>
-    dplyr::filter(EncuestaId %in% encuesta_id) |>
-    dplyr::transmute(lote_id = Id)
-
-  resultados <- dplyr::tbl(pool, "ResultadoAuditoriaBot") |>
-    dplyr::inner_join(lotes, by = dplyr::join_by(LoteAuditoriaId == lote_id))
-
-  if (!is.null(fecha_inicio) && !is.null(fecha_fin)) {
-    # ResultadoAuditoriaBot.Fecha se almacena en UTC (igual que EvaluacionRegistro.Fecha en
-    # la fuente legado); fecha_inicio/fecha_fin llegan en horario CDMX (día natural del
-    # reporte semanal). Se convierten los límites del día CDMX a su instante UTC equivalente
-    # ANTES de armar el filtro, para que se traduzca como literales portables entre backends
-    # (SQL Server, SQLite en pruebas) en vez de una expresión aritmética sobre la columna remota.
-    fecha_inicio_utc <- lubridate::with_tz(
-      as.POSIXct(paste(fecha_inicio, "00:00:00"), tz = "America/Mexico_City"), "UTC"
-    )
-    fecha_fin_exclusiva_utc <- lubridate::with_tz(
-      as.POSIXct(paste(fecha_fin + 1, "00:00:00"), tz = "America/Mexico_City"), "UTC"
-    )
-    resultados <- resultados |>
-      dplyr::filter(Fecha >= fecha_inicio_utc, Fecha < fecha_fin_exclusiva_utc)
-  }
-
-  aud <- resultados |>
+  aud <- dplyr::tbl(pool, "ResultadoAuditoriaBot") |>
+    dplyr::filter(RegistroId %in% !!registros$RegistroId) |>
     cast_a_texto("VeredictoJson", "js") |>
-    dplyr::select(Id, RegistroId, Fecha, js) |>
+    dplyr::select(Id, RegistroId, js) |>
     dplyr::collect()
 
-  vacio <- tibble::tibble(RegistroId = integer(), usuario_num = character(), fecha = as.Date(character()),
-                          dictamenFinal = character(), totalEvaluacion = character(),
-                          observaciones = character())
   if (nrow(aud) == 0) return(vacio)
 
   # re-auditorías del mismo registro: vale la ÚLTIMA pasada del bot
@@ -209,11 +254,6 @@ fetch_auditoria_bot <- function(pool, encuesta_id, fecha_inicio = NULL, fecha_fi
     dplyr::group_by(RegistroId) |>
     dplyr::slice_max(Id, n = 1, with_ties = FALSE) |>
     dplyr::ungroup()
-
-  registros_id <- dplyr::tbl(pool, "Registros") |>
-    dplyr::filter(EncuestaId %in% encuesta_id) |>
-    dplyr::transmute(RegistroId = Id, usuario_num = UsuarioNum) |>
-    dplyr::collect()
 
   # verificación HUMANA (si ya la hay): la última por auditoría
   revision <- dplyr::tbl(pool, "RevisionAuditoriaBot") |>
@@ -228,10 +268,6 @@ fetch_auditoria_bot <- function(pool, encuesta_id, fecha_inicio = NULL, fecha_fi
 
   aud <- aud |>
     parsear_veredicto_json("js") |>
-    dplyr::mutate(
-      fecha_hora_cdmx = lubridate::with_tz(Fecha, tzone = "America/Mexico_City"),
-      fecha = as.Date(fecha_hora_cdmx)
-    ) |>
     dplyr::left_join(revision, by = c("Id" = "ResultadoAuditoriaBotId"))
 
   # cuando existe una revisión humana con veredicto corregido, esta reemplaza
@@ -246,7 +282,7 @@ fetch_auditoria_bot <- function(pool, encuesta_id, fecha_inicio = NULL, fecha_fi
   }
 
   dplyr::bind_rows(sin_revision, con_revision) |>
-    dplyr::left_join(registros_id, by = "RegistroId") |>
+    dplyr::inner_join(registros, by = "RegistroId") |>
     dplyr::transmute(RegistroId, usuario_num, fecha, dictamenFinal, totalEvaluacion, observaciones)
 }
 
@@ -268,19 +304,24 @@ fetch_auditoria_bot <- function(pool, encuesta_id, fecha_inicio = NULL, fecha_fi
 #'   `dictamenFinal`, `totalEvaluacion`, `observaciones`.
 #' @keywords internal
 obtener_evaluaciones <- function(pool, encuesta_id, fuente_auditoria, fecha_inicio_au, fecha_fin_au) {
-  if (fuente_auditoria == "legacy") {
-    return(fetch_auditoria_legacy(pool, encuesta_id))
-  }
-
   if (fuente_auditoria == "bot") {
-    # Reporte semanal: solo se necesita la semana inmediata anterior, se empuja el filtro a SQL.
-    return(fetch_auditoria_bot(pool, encuesta_id, fecha_inicio_au, fecha_fin_au))
+    # Reporte semanal: solo se necesita la semana en curso, se empuja el filtro a SQL
+    # sobre Registros.FechaInicio (cuándo ocurrió el diálogo, no cuándo se auditó).
+    registros <- registros_efectivos(pool, encuesta_id, fecha_inicio_au, fecha_fin_au)
+    return(fetch_auditoria_bot(pool, registros))
   }
 
-  # "combinar": histórico completo de ambas fuentes; el bot gana cuando el RegistroId
-  # existe en ambas.
-  legacy <- fetch_auditoria_legacy(pool, encuesta_id)
-  bot    <- fetch_auditoria_bot(pool, encuesta_id, fecha_inicio = NULL, fecha_fin = NULL)
+  # "legacy"/"combinar": histórico completo de diálogos efectivos; el llamador filtra por
+  # fecha del diálogo más adelante (evaluacion_sem en generar_reporte_metricas()).
+  registros <- registros_efectivos(pool, encuesta_id)
+
+  if (fuente_auditoria == "legacy") {
+    return(fetch_auditoria_legacy(pool, registros))
+  }
+
+  # "combinar": une ambas fuentes; el bot gana cuando el RegistroId existe en ambas.
+  legacy <- fetch_auditoria_legacy(pool, registros)
+  bot    <- fetch_auditoria_bot(pool, registros)
   dplyr::bind_rows(bot, legacy |> dplyr::filter(!RegistroId %in% bot$RegistroId))
 }
 

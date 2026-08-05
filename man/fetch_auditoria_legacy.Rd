@@ -4,20 +4,24 @@
 \alias{fetch_auditoria_legacy}
 \title{Obtener auditorías (fuente legado: EvaluacionRegistro)}
 \usage{
-fetch_auditoria_legacy(pool, encuesta_id)
+fetch_auditoria_legacy(pool, registros)
 }
 \arguments{
 \item{pool}{Objeto de conexión \code{pool}.}
 
-\item{encuesta_id}{Vector. Identificador(es) de encuesta.}
+\item{registros}{Tibble con columnas \code{RegistroId}, \code{usuario_num}, \code{fecha} — ver
+\code{\link{registros_efectivos}}.}
 }
 \value{
 Tibble normalizado con columnas \code{RegistroId}, \code{usuario_num}, \code{fecha},
 \code{dictamenFinal}, \code{totalEvaluacion}, \code{observaciones}.
 }
 \description{
-Extrae todo el histórico de evaluaciones de auditoría de la(s) encuesta(s) indicada(s)
-desde \code{EvaluacionRegistro}, cruzando con \code{Registros} para obtener \code{usuario_num}.
-No aplica filtro de fecha: el llamador decide qué ventana usar.
+Cruza los diálogos efectivos ya resueltos (\code{registros}, ver \code{\link{registros_efectivos}})
+con \code{EvaluacionRegistro} para obtener su veredicto. \code{fecha} en el resultado es la del
+diálogo (heredada de \code{registros}), no la de la auditoría. Algunas encuestas no tienen
+tabla \code{EvaluacionRegistro}, o la tienen pero sin filas ligadas a sus \code{RegistroId}
+(nunca usaron el flujo legado, o ya migraron por completo al bot); en ambos casos
+retorna un tibble vacío en vez de fallar.
 }
 \keyword{internal}

@@ -3,10 +3,15 @@
 crear_con_legacy <- function() {
   con <- DBI::dbConnect(RSQLite::SQLite(), ":memory:")
 
+  # 'fecha' para el reporte se deriva de Registros.FechaInicio (cuándo ocurrió el diálogo),
+  # no de EvaluacionRegistro.Fecha (cuándo se auditó) — ver registros_efectivos().
+  # Id = 1 cae fuera del rango manual (24 de julio); Id = 2 y 3 caen dentro (25 y 31 de julio).
   DBI::dbWriteTable(con, "Registros", data.frame(
     Id = c(1L, 2L, 3L),
     EncuestaId = c(1L, 1L, 1L),
     UsuarioNum = c("001", "001", "001"),
+    TipoRegistro = c("Efectivo", "Efectivo", "Efectivo"),
+    FechaInicio = as.POSIXct(c("2026-07-24 18:00:00", "2026-07-25 18:00:00", "2026-07-31 18:00:00"), tz = "UTC"),
     stringsAsFactors = FALSE
   ))
 
@@ -16,11 +21,8 @@ crear_con_legacy <- function() {
     ), auto_unbox = TRUE))
   }
 
-  # Id = 1 cae fuera del rango manual (24 de julio); Id = 2 y 3 caen dentro (25 y 31 de julio).
   DBI::dbWriteTable(con, "EvaluacionRegistro", data.frame(
     RegistroId = c(1L, 2L, 3L),
-    Fecha = as.POSIXct(c("2026-07-24 12:00:00", "2026-07-25 12:00:00", "2026-07-31 12:00:00"),
-                       tz = "America/Mexico_City"),
     Resultado = c(veredicto("Diálogo Óptimo", 5), veredicto("Diálogo Óptimo", 5), veredicto("Diálogo Aceptable", 3)),
     stringsAsFactors = FALSE
   ))
