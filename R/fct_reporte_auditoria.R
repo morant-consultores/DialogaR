@@ -102,28 +102,25 @@ parsear_veredicto_json <- function(df, col_json) {
 #'
 #' @return Tibble con columnas `RegistroId`, `usuario_num`, `fecha`.
 #'
-#' @importFrom lubridate with_tz
 #' @keywords internal
 registros_efectivos <- function(pool, encuesta_id, fecha_inicio = NULL, fecha_fin = NULL) {
   q <- dplyr::tbl(pool, "Registros") |>
     dplyr::filter(EncuestaId %in% encuesta_id, TipoRegistro == "Efectivo")
 
   if (!is.null(fecha_inicio) && !is.null(fecha_fin)) {
-    # FechaInicio se almacena en UTC; se construyen los límites como instantes con tz
-    # CDMX (día natural local) y se dejan que dbplyr los traduzca a su equivalente UTC
-    # para la comparación SQL contra la columna remota.
-    fecha_inicio_dt <- as.POSIXct(paste(fecha_inicio, "00:00:00"), tz = "America/Mexico_City")
-    fecha_fin_exclusiva_dt <- as.POSIXct(paste(fecha_fin + 1, "00:00:00"), tz = "America/Mexico_City")
+    # FechaInicio ya está en horario local CDMX (no UTC): los límites se construyen como
+    # texto naive en esa misma hora, sin objeto POSIXct de por medio. Un POSIXct con tz
+    # explícito (p. ej. "America/Mexico_City") dbplyr lo traduce a su equivalente UTC antes
+    # de enviarlo a SQL, lo que restaría 6 horas al comparar contra la columna local.
+    fecha_inicio_dt <- paste(fecha_inicio, "00:00:00")
+    fecha_fin_exclusiva_dt <- paste(fecha_fin + 1, "00:00:00")
     q <- q |> dplyr::filter(FechaInicio >= fecha_inicio_dt, FechaInicio < fecha_fin_exclusiva_dt)
   }
 
   q |>
     dplyr::transmute(RegistroId = Id, usuario_num = UsuarioNum, FechaInicio) |>
     dplyr::collect() |>
-    dplyr::mutate(
-      fecha_hora_cdmx = lubridate::with_tz(lubridate::as_datetime(FechaInicio), tzone = "America/Mexico_City"),
-      fecha = as.Date(fecha_hora_cdmx, tz = "America/Mexico_City")
-    ) |>
+    dplyr::mutate(fecha = as.Date(FechaInicio)) |>
     dplyr::select(RegistroId, usuario_num, fecha)
 }
 

@@ -96,7 +96,7 @@ test_that("obtener_evaluaciones('combinar') privilegia el bot sobre el legado, u
     EncuestaId = c(1L, 1L, 1L),
     UsuarioNum = c("101", "102", "103"),
     TipoRegistro = c("Efectivo", "Efectivo", "Efectivo"),
-    FechaInicio = as.POSIXct(c("2026-06-01 18:00:00", "2026-06-02 14:00:00", "2026-06-01 18:00:00"), tz = "UTC"),
+    FechaInicio = c("2026-06-01 18:00:00", "2026-06-02 14:00:00", "2026-06-01 18:00:00"),
     stringsAsFactors = FALSE
   ))
 
