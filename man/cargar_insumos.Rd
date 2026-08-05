@@ -27,7 +27,10 @@ cargar_insumos(
 
 \item{corte}{Date. Fecha límite de análisis.}
 
-\item{fuentes_actividad}{List. Lista de tablas origen y sus metadatos.}
+\item{fuentes_actividad}{List. Lista de tablas origen y sus metadatos.
+Cada elemento admite un campo opcional \code{pool} con una conexión DBI propia
+(por ejemplo, cuando la fuente vive en un servidor distinto al de \code{pool},
+como un snapshot); si se omite, se usa el \code{pool} principal.}
 
 \item{ids_pase_lista}{Numeric vector. IDs de los cuestionarios de pase de lista.}
 
