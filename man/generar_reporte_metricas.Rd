@@ -12,12 +12,15 @@ generar_reporte_metricas(
   bd_aux,
   encuesta_id,
   corte,
-  inicio_semanal = "lunes",
-  fin_semanal = "domingo",
   simular_domingo = FALSE,
   excluir_brigadas = NULL,
   filtrar_historicos = FALSE,
-  path_historicos = NULL
+  path_historicos = NULL,
+  fecha_inicio_auditoria = NULL,
+  fecha_fin_auditoria = NULL,
+  fecha_inicio_efectivos = NULL,
+  fecha_fin_efectivos = NULL,
+  fuente_auditoria = c("legacy", "bot", "combinar")
 )
 
 generar_metricas_auditoria(
@@ -27,12 +30,15 @@ generar_metricas_auditoria(
   bd_aux,
   encuesta_id,
   corte,
-  inicio_semanal = "lunes",
-  fin_semanal = "domingo",
   simular_domingo = FALSE,
   excluir_brigadas = NULL,
   filtrar_historicos = FALSE,
-  path_historicos = NULL
+  path_historicos = NULL,
+  fecha_inicio_auditoria = NULL,
+  fecha_fin_auditoria = NULL,
+  fecha_inicio_efectivos = NULL,
+  fecha_fin_efectivos = NULL,
+  fuente_auditoria = c("legacy", "bot", "combinar")
 )
 }
 \arguments{
@@ -48,10 +54,6 @@ generar_metricas_auditoria(
 
 \item{corte}{Fecha o string (\code{YYYY-MM-DD}) que define el límite superior para la auditoría semanal.}
 
-\item{inicio_semanal}{Caracter. Día de inicio del periodo efectivo (ej. \code{"lunes"}). Por defecto \code{"lunes"}.}
-
-\item{fin_semanal}{Caracter. Día de cierre del periodo efectivo (ej. \code{"domingo"}). Por defecto \code{"domingo"}.}
-
 \item{simular_domingo}{Lógico. Si \code{TRUE}, ajusta el corte al domingo de esa misma semana. Por defecto \code{FALSE}.}
 
 \item{excluir_brigadas}{Vector de caracteres. Nombres o patrones de brigadas a excluir del reporte. Por defecto \code{NULL}.}
@@ -59,6 +61,27 @@ generar_metricas_auditoria(
 \item{filtrar_historicos}{Lógico. Si \code{TRUE}, los promedios históricos se calculan solo con los IDs del RDS acumulado, que también se actualiza con los registros de esta semana. Por defecto \code{FALSE}.}
 
 \item{path_historicos}{Ruta al archivo \code{.rds} que acumula los IDs históricos. Requerido cuando \code{filtrar_historicos = TRUE}. Por defecto \code{NULL}.}
+
+\item{fecha_inicio_auditoria, fecha_fin_auditoria}{Fecha. Cuando ambos se indican, reemplazan
+el cálculo automático del rango de auditoría (que normalmente es la semana natural
+lunes-domingo que contiene a \code{corte}), permitiendo un rango arbitrario — por ejemplo,
+para reconstruir un reporte histórico de una semana operativa que no inicia en lunes.
+\code{corte} sigue siendo obligatorio pero deja de determinar el rango de auditoría cuando
+se usan estos parámetros. Por defecto \code{NULL} (comportamiento estándar).}
+
+\item{fecha_inicio_efectivos, fecha_fin_efectivos}{Fecha. Cuando ambos se indican, fijan
+la ventana de producción (\code{efectivos}) de forma independiente de la ventana de
+auditoría. Por defecto \code{NULL}, en cuyo caso la ventana de efectivos es la misma que
+la de auditoría (\code{fecha_inicio_au}/\code{fecha_fin_au}).}
+
+\item{fuente_auditoria}{Caracter. Fuente de las evaluaciones de auditoría: \code{"legacy"}
+(por defecto) lee \code{EvaluacionRegistro}, tal como siempre; \code{"bot"} lee únicamente las
+auditorías automáticas de \code{ResultadoAuditoriaBot} para la semana en curso (pensado para
+el reporte semanal de encuestas ya migradas al bot); \code{"combinar"} une el histórico
+completo de ambas fuentes, privilegiando el bot cuando un mismo \code{RegistroId} existe en
+las dos (uso para reportes que deben conservar continuidad histórica, p. ej. el de
+Lorenia). No todas las encuestas tienen datos en \code{ResultadoAuditoriaBot}; usar \code{"bot"}
+o \code{"combinar"} solo cuando se confirmó que la encuesta ya se audita con el bot.}
 }
 \value{
 Una \code{lista} con tres elementos:
@@ -74,9 +97,10 @@ coordinadores, cruza los datos con las evaluaciones de auditoría almacenadas en
 base de datos y genera estructuras listas para reporte. Opcionalmente actualiza y
 filtra un archivo histórico local en formato RDS.
 
-Este reporte trabaja con dos periodos de tiempo: la columna \code{efectivos} refleja
-la semana inmediata previa, mientras que los valores de auditoría corresponden a
-la semana natural corriente (lunes a domingo).
+Este reporte trabaja con dos periodos de tiempo, \code{efectivos} (producción) y
+\code{auditoría} (evaluaciones). Por defecto ambos son la misma semana; use
+\code{fecha_inicio_efectivos}/\code{fecha_fin_efectivos} si se necesita que la ventana de
+producción difiera de la de auditoría.
 }
 \section{Seguridad y Privacidad}{
 
