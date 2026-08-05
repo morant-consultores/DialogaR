@@ -48,4 +48,4 @@ jobs:
           # Solo falla en ERROR: el paquete tiene WARNINGs/NOTEs preexistentes e inherentes
           # (texto en español con acentos, parámetros deprecados sin documentar a propósito,
           # bindings NSE de dplyr) que no representan regresiones.
-          error_on: '"error"'
+          error-on: '"error"'
