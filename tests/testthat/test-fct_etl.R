@@ -223,7 +223,8 @@ test_that("cargar_insumos no excluye de bd_aux a usuarios con actividad real per
     pool = con,
     id_proyecto = 10L,
     corte = as.Date("2026-03-31"),
-    fuentes_actividad = fuentes
+    fuentes_actividad = fuentes,
+    incluir_productores_historicos = TRUE
   ))
 
   bd_aux <- resultado$bd_aux
@@ -244,10 +245,20 @@ test_that("cargar_insumos no excluye de bd_aux a usuarios con actividad real per
   expect_warning(
     cargar_insumos(
       pool = con, id_proyecto = 10L, corte = as.Date("2026-03-31"),
-      fuentes_actividad = fuentes
+      fuentes_actividad = fuentes,
+      incluir_productores_historicos = TRUE
     ),
     "actividad real pero sin UsuariosEncuesta"
   )
+
+  # Por omisión el rescate NO aplica: se preserva el comportamiento previo.
+  bd_aux_off <- suppressWarnings(cargar_insumos(
+    pool = con,
+    id_proyecto = 10L,
+    corte = as.Date("2026-03-31"),
+    fuentes_actividad = fuentes
+  ))$bd_aux
+  expect_equal(nrow(bd_aux_off[bd_aux_off$vocero == "003", ]), 0L)
 })
 
 test_that("cargar_insumos resuelve nombre de zona de trabajo y grupo en bd_aux", {
@@ -1278,4 +1289,76 @@ test_that("excluir_brigadas_prueba sin coincidencias devuelve insumos intactos",
 
   expect_equal(nrow(res$bd_aux), 1L)
   expect_equal(nrow(res$bd_actividad), 1L)
+})
+
+test_that("cargar_insumos rescata por id_usuario aunque el teléfono haya cambiado", {
+  # Motivación: el vocero cambió de número. bd_actividad conserva el viejo
+  # ("999"), Usuarios/num_map ya tienen el nuevo ("003"). Un cruce por teléfono
+  # no lo encuentra; por id_usuario_actividad sí.
+  con <- DBI::dbConnect(RSQLite::SQLite(), ":memory:")
+  on.exit(DBI::dbDisconnect(con))
+
+  DBI::dbWriteTable(con, "Usuarios", data.frame(
+    Id = c(1L, 2L, 3L),
+    IdProyecto = c(10L, 10L, 10L),
+    Num = c("001", "002", "003"),
+    Cargo = c("Vocero", "Coordinador de Brigada", "Vocero"),
+    Status = c(TRUE, TRUE, TRUE),
+    Municipio = c("Centro", "Centro", "Centro"),
+    Nombre = c("Juan", "Carlos", "Ana"),
+    APaterno = c("Perez", "Soto", "Ruiz"),
+    AMaterno = c("Lopez", "Diaz", "Cruz"),
+    IdBrigada = c(100L, 100L, 100L),
+    Capacitacion = c(TRUE, FALSE, TRUE),
+    FechaUpdate = rep("2026-01-01", 3),
+    stringsAsFactors = FALSE
+  ))
+  DBI::dbWriteTable(con, "Brigadas", data.frame(
+    Id = 100L, NombreBrigada = "06_BRIGADA NORTE", Activo = TRUE,
+    IdZonaDeTrabajo = 1L, IdUsuario = 2L, IdProyecto = 10L, stringsAsFactors = FALSE
+  ))
+  DBI::dbWriteTable(con, "Municipios", data.frame(Id = 1L, Municipio = "Centro", stringsAsFactors = FALSE))
+  DBI::dbWriteTable(con, "ZonaDeTrabajo", data.frame(IdZona = 1L, Descripcion = "6B", IdProyecto = 10L, stringsAsFactors = FALSE))
+  DBI::dbWriteTable(con, "Grupos", data.frame(Id = 1L, Descripcion = "Cots", IdProyecto = 10L, stringsAsFactors = FALSE))
+  DBI::dbWriteTable(con, "UsuarioLog", data.frame(
+    IdHistorico = c(1L, 2L), IdUsuario = c(1L, 3L), IdCargo = c(1L, 1L),
+    IdEstado = c(1L, 1L), IdMunicipio = c(1L, 1L), IdZonaDeTabajo = c(1L, 1L),
+    IdSupervisor = c(2L, 2L), IdBrigada = c(100L, 100L),
+    FechaInsert = rep("2026-01-15 00:00:00", 2), IdProyecto = c(10L, 10L),
+    stringsAsFactors = FALSE
+  ))
+  DBI::dbWriteTable(con, "BrigadasLog", data.frame(
+    IdHistorico = c(1L, 2L), BrigadaId = c(100L, 100L),
+    NombreBrigada = c("06_BRIGADA NORTE", "06_BRIGADA NORTE"),
+    IdUsuario = c(NA_integer_, 2L), IdZonaDeTrabajo = c(1L, 1L), IdGrupo = c(1L, 1L),
+    Activo = c(TRUE, TRUE),
+    FechaInsert = c("2026-01-01 00:00:00", "2026-01-15 00:00:00"),
+    IdProyecto = c(10L, 10L), stringsAsFactors = FALSE
+  ))
+
+  # usuario_num "999" ya no corresponde a nadie en Usuarios; usuario_id sí.
+  DBI::dbWriteTable(con, "snapshot_id_1", data.frame(
+    fecha = "2026-03-20", usuario_num = "999", usuario_id = 3L,
+    seccion = "0001", desglose = "Efectivo", duracion_minutos = 10,
+    origen = "Actividad", stringsAsFactors = FALSE
+  ))
+  DBI::dbWriteTable(con, "UsuariosEncuesta", data.frame(
+    UsuarioId = c(1L, 2L), EncuestaId = c(1L, 1L), Activo = c(TRUE, TRUE),
+    stringsAsFactors = FALSE
+  ))
+
+  fuentes <- list(list(
+    tabla = "snapshot_id_1",
+    select_cols = c("fecha", "usuario_num", "usuario_id", "seccion", "desglose", "duracion_minutos"),
+    origen = "Actividad"
+  ))
+
+  bd_aux <- suppressWarnings(cargar_insumos(
+    pool = con, id_proyecto = 10L, corte = as.Date("2026-03-31"),
+    fuentes_actividad = fuentes, incluir_productores_historicos = TRUE
+  ))$bd_aux
+
+  # Ana (Id 3) entra por id pese a que su teléfono en la actividad ya no casa.
+  expect_equal(nrow(bd_aux[bd_aux$vocero == "003", ]), 1L)
+  expect_equal(bd_aux[bd_aux$vocero == "003", ]$nombre_vocero, "ANA RUIZ CRUZ")
 })

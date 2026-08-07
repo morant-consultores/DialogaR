@@ -98,7 +98,7 @@ base de datos y genera estructuras listas para reporte. Opcionalmente actualiza 
 filtra un archivo histórico local en formato RDS.
 
 Este reporte trabaja con dos periodos de tiempo, \code{efectivos} (producción) y
-\code{auditoría} (evaluaciones). Por defecto ambos son la misma semana; use
+\verb{auditoría} (evaluaciones). Por defecto ambos son la misma semana; use
 \code{fecha_inicio_efectivos}/\code{fecha_fin_efectivos} si se necesita que la ventana de
 producción difiera de la de auditoría.
 }

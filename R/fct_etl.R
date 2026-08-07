@@ -606,6 +606,29 @@ excluir_brigadas_prueba <- function(bd_aux, bd_actividad, patron = "prueba") {
 #'   (diálogos) registrada, se emite una advertencia clara antes de excluirla.
 #' @param patron_pruebas Character. Expresión regular (case-insensitive) para
 #'   identificar brigadas de prueba por `nombre_brigada`. Por defecto `"prueba"`.
+#' @param incluir_productores_historicos Logical. Si `FALSE` (por defecto), el
+#'   universo de usuarios se limita a quienes tienen asignación activa en
+#'   `UsuariosEncuesta`. Si `TRUE`, se le une quien ya registró actividad real en
+#'   `bd_actividad` para esta fuente, aunque hoy no tenga asignación vigente.
+#'
+#'   La identidad se toma de `id_usuario_actividad` (FK a `Usuarios.Id`) y no del
+#'   teléfono, porque el número puede cambiar: al cambiar, `bd_actividad` conserva
+#'   el viejo y el catálogo ya tiene el nuevo, de modo que un cruce por teléfono
+#'   falla precisamente para el vocero que se busca rescatar. Para las filas sin
+#'   id (snapshots anteriores a v0.3.0) se usa el teléfono como respaldo.
+#'
+#'   Úsese en reportes históricos o acumulados: `UsuariosEncuesta` refleja el
+#'   estado *actual*, de modo que una baja, un cambio de cuestionario o el borrado
+#'   de la asignación elimina retroactivamente del reporte la actividad ya
+#'   registrada por ese vocero. Como `usuarios_asignados` alimenta también a
+#'   `resolver_estructura_corte()`, el vocero no pierde solo el nombre: desaparece
+#'   de `bd_aux` por completo.
+#'
+#'   El rescate solo aplica cuando la compuerta de `UsuariosEncuesta` está
+#'   genuinamente activa. Si viene vacía (la fuente no sigue el patrón
+#'   `snapshot_id_N`, o no hay asignaciones para esa encuesta) se conserva el
+#'   comportamiento de "sin filtro" en vez de restringir el universo a quienes
+#'   produjeron datos, que sería más estrecho que el comportamiento original.
 #'
 #' @return Una lista estructurada (`insumos`) con los dataframes listos para reporteo.
 #' @importFrom lubridate as_datetime with_tz as_date
@@ -623,7 +646,8 @@ cargar_insumos <- function(
   postprocess_insumos = NULL,
   cargo_coordinador = "Coordinador de Brigada",
   excluir_pruebas = TRUE,
-  patron_pruebas = "prueba"
+  patron_pruebas = "prueba",
+  incluir_productores_historicos = FALSE
 ) {
   coordinadores_cat   <- cargar_coordinadores_cat(pool, id_proyecto, cargo_coordinador)
   brigadas_cat        <- cargar_brigadas_cat(pool, id_proyecto)
@@ -664,7 +688,8 @@ cargar_insumos <- function(
   )
 
   # usuarios_asignados: union de (a) quien tiene UsuariosEncuesta activo para
-  # esta encuesta y (b) quien ya registró actividad real en bd_actividad.
+  # esta encuesta y (b) quien ya registró actividad real en bd_actividad,
+  # identificado por id_usuario_actividad (ver bloque de abajo).
   # (b) evita que un alta incompleta en UsuariosEncuesta le cueste a alguien
   # su brigada/coordinador en bd_aux cuando el propio sistema ya demuestra
   # que trabajó: perder voceros de la estructura significa perder su
@@ -678,10 +703,29 @@ cargar_insumos <- function(
   # resolver_estructura_corte(). El rescate por actividad solo aplica cuando el
   # gate de UsuariosEncuesta está genuinamente activo.
   usuarios_asignados <- usuarios_asignados_encuesta
-  if (length(usuarios_asignados_encuesta) > 0) {
-    usuarios_con_actividad <- num_map |>
-      dplyr::filter(num %in% unique(bd_actividad$usuario_num)) |>
-      dplyr::pull(id_usuario)
+  if (isTRUE(incluir_productores_historicos) && length(usuarios_asignados_encuesta) > 0) {
+    # Identidad por id_usuario_actividad (FK a Usuarios.Id), no por teléfono: el
+    # número puede cambiar, y cuando cambia bd_actividad conserva el viejo
+    # mientras num_map ya tiene el nuevo, así que el cruce por num falla justo
+    # para quien se quiere rescatar.
+    ids_por_id <- unique(bd_actividad$id_usuario_actividad)
+    ids_por_id <- ids_por_id[!is.na(ids_por_id)]
+
+    # Respaldo por teléfono solo para las filas sin id: snapshots anteriores a
+    # v0.3.0 (sin la columna) o filas previas a que la plataforma la poblara.
+    nums_sin_id <- unique(
+      bd_actividad$usuario_num[is.na(bd_actividad$id_usuario_actividad)]
+    )
+    nums_sin_id <- nums_sin_id[!is.na(nums_sin_id)]
+    ids_por_num <- if (length(nums_sin_id) > 0) {
+      num_map |>
+        dplyr::filter(num %in% nums_sin_id) |>
+        dplyr::pull(id_usuario)
+    } else {
+      integer(0)
+    }
+
+    usuarios_con_actividad <- unique(c(ids_por_id, ids_por_num))
     usuarios_asignados <- union(usuarios_asignados_encuesta, usuarios_con_actividad)
 
     rescatados <- setdiff(usuarios_con_actividad, usuarios_asignados_encuesta)
