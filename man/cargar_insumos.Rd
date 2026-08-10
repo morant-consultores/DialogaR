@@ -17,7 +17,8 @@ cargar_insumos(
   postprocess_insumos = NULL,
   cargo_coordinador = "Coordinador de Brigada",
   excluir_pruebas = TRUE,
-  patron_pruebas = "prueba"
+  patron_pruebas = "prueba",
+  incluir_productores_historicos = FALSE
 )
 }
 \arguments{
@@ -56,6 +57,30 @@ que no aparezcan en ningún reporte. Si alguna brigada de prueba tiene actividad
 
 \item{patron_pruebas}{Character. Expresión regular (case-insensitive) para
 identificar brigadas de prueba por \code{nombre_brigada}. Por defecto \code{"prueba"}.}
+
+\item{incluir_productores_historicos}{Logical. Si \code{FALSE} (por defecto), el
+universo de usuarios se limita a quienes tienen asignación activa en
+\code{UsuariosEncuesta}. Si \code{TRUE}, se le une quien ya registró actividad real en
+\code{bd_actividad} para esta fuente, aunque hoy no tenga asignación vigente.
+
+La identidad se toma de \code{id_usuario_actividad} (FK a \code{Usuarios.Id}) y no del
+teléfono, porque el número puede cambiar: al cambiar, \code{bd_actividad} conserva
+el viejo y el catálogo ya tiene el nuevo, de modo que un cruce por teléfono
+falla precisamente para el vocero que se busca rescatar. Para las filas sin
+id (snapshots anteriores a v0.3.0) se usa el teléfono como respaldo.
+
+Úsese en reportes históricos o acumulados: \code{UsuariosEncuesta} refleja el
+estado \emph{actual}, de modo que una baja, un cambio de cuestionario o el borrado
+de la asignación elimina retroactivamente del reporte la actividad ya
+registrada por ese vocero. Como \code{usuarios_asignados} alimenta también a
+\code{resolver_estructura_corte()}, el vocero no pierde solo el nombre: desaparece
+de \code{bd_aux} por completo.
+
+El rescate solo aplica cuando la compuerta de \code{UsuariosEncuesta} está
+genuinamente activa. Si viene vacía (la fuente no sigue el patrón
+\code{snapshot_id_N}, o no hay asignaciones para esa encuesta) se conserva el
+comportamiento de "sin filtro" en vez de restringir el universo a quienes
+produjeron datos, que sería más estrecho que el comportamiento original.}
 }
 \value{
 Una lista estructurada (\code{insumos}) con los dataframes listos para reporteo.
