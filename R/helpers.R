@@ -67,48 +67,6 @@ usar_plantilla <- function(plantilla, destino = NULL, sobreescribir = FALSE) {
   invisible(ruta_destino)
 }
 
-coerce_numeric_candidates <- function(
-  df,
-  exclude = c(
-    "id",
-    "fecha",
-    "obtener_usuario",
-    "usuario",
-    "vocero",
-    "supervisor",
-    "asistencia",
-    "finalizar",
-    "observaciones"
-  )
-) {
-  df |>
-    mutate(across(
-      .cols = where(is.character) & !any_of(exclude),
-      .fns = ~ {
-        x <- stringr::str_squish(.x)
-        # Solo intentar si hay al menos un valor no-NA
-        if (all(is.na(x))) {
-          return(x)
-        }
-
-        # Normalización mínima: quitar comas de miles (si existieran)
-        x2 <- stringr::str_replace_all(x, ",", "")
-
-        # ¿Qué tan "numérica" es la columna? (permitimos "", NA)
-        ok <- is.na(x2) |
-          x2 == "" |
-          stringr::str_detect(x2, "^[+-]?[0-9]+(\\.[0-9]+)?$")
-        ratio_ok <- mean(ok)
-
-        if (ratio_ok >= 0.95) {
-          suppressWarnings(as.numeric(dplyr::na_if(x2, "")))
-        } else {
-          .x
-        }
-      }
-    ))
-}
-
 #' Autentica con Google Drive usando una Service Account
 #'
 #' @description
