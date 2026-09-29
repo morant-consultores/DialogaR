@@ -43,6 +43,31 @@ make_pl_main <- function(corte, supervisor = "002", vocero = "001") {
 }
 
 # =========================================================================
+# TESTS: coerce_numeric_candidates
+# =========================================================================
+
+test_that("coerce_numeric_candidates excluye columnas motivo_* y respeta threshold configurable", {
+  # Regresión: coerce_numeric_candidates estaba duplicada en R/helpers.R (versión
+  # antigua, sin exclusiones motivo_* ni threshold configurable) y R/fct_productividad.R
+  # (versión vigente). Sin `Collate:` en DESCRIPTION, el orden alfabético de carga
+  # hacía que la definición de helpers.R sobrescribiera silenciosamente a la otra.
+  df <- tibble::tibble(
+    motivo_no        = c("1", "2", "3"),   # debe permanecer character (excluida)
+    otra_col         = c("10", "20", "30") # sí debe coercionarse
+  )
+
+  resultado <- DialogaR:::coerce_numeric_candidates(df)
+  expect_type(resultado$motivo_no, "character")
+  expect_type(resultado$otra_col, "double")
+
+  # threshold configurable: con threshold = 1 y una columna con un solo valor
+  # no numérico, no debe coercionarse.
+  df2 <- tibble::tibble(mixta = c("1", "2", "no numérico"))
+  resultado_estricto <- DialogaR:::coerce_numeric_candidates(df2, threshold = 1)
+  expect_type(resultado_estricto$mixta, "character")
+})
+
+# =========================================================================
 # TESTS: generar_reporte_productividad
 # =========================================================================
 
