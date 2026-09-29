@@ -46,6 +46,11 @@ Predeterminado: \code{"-"}.}
 \item{clasificacion}{Lógico. Si \code{TRUE}, añade las columnas \code{grupo} y
 \code{categoria} con la clasificación estratégica del contacto. Requiere que
 \code{partido} no sea \code{NULL}. Predeterminado: \code{FALSE}.}
+
+\item{voceros, brigadas, coordinadores, aux_zonas}{Obsoletos, eliminados en
+v0.3.0. Se conservan únicamente para producir un error explícito si
+algún llamador todavía los pasa; usa \code{bd_aux} en su lugar. Deben
+omitirse o dejarse en \code{NULL}.}
 }
 \value{
 Data frame con una fila por contacto que tenga correo o celular

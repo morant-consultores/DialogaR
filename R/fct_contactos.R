@@ -26,6 +26,10 @@
 #' @param clasificacion Lógico. Si `TRUE`, añade las columnas `grupo` y
 #'   `categoria` con la clasificación estratégica del contacto. Requiere que
 #'   `partido` no sea `NULL`. Predeterminado: `FALSE`.
+#' @param voceros,brigadas,coordinadores,aux_zonas Obsoletos, eliminados en
+#'   v0.3.0. Se conservan únicamente para producir un error explícito si
+#'   algún llamador todavía los pasa; usa `bd_aux` en su lugar. Deben
+#'   omitirse o dejarse en `NULL`.
 #'
 #' @return Data frame con una fila por contacto que tenga correo o celular
 #'   registrado. Incluye columnas de identificación, ubicación, datos de
