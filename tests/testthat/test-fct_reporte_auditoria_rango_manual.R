@@ -23,6 +23,7 @@ crear_con_legacy <- function() {
   }
 
   DBI::dbWriteTable(con, "EvaluacionRegistro", data.frame(
+    Id = c(1L, 2L, 3L),
     RegistroId = c(1L, 2L, 3L),
     Resultado = c(veredicto("Diálogo Óptimo", 5), veredicto("Diálogo Óptimo", 5), veredicto("Diálogo Aceptable", 3)),
     stringsAsFactors = FALSE

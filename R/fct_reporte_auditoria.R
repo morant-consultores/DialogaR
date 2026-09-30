@@ -132,7 +132,8 @@ registros_efectivos <- function(pool, encuesta_id, fecha_inicio = NULL, fecha_fi
 #' diálogo (heredada de `registros`), no la de la auditoría. Algunas encuestas no tienen
 #' tabla `EvaluacionRegistro`, o la tienen pero sin filas ligadas a sus `RegistroId`
 #' (nunca usaron el flujo legado, o ya migraron por completo al bot); en ambos casos
-#' retorna un tibble vacío en vez de fallar.
+#' retorna un tibble vacío en vez de fallar. Si un `RegistroId` tiene más de una fila
+#' (re-evaluación manual), vale la última (`Id` más alto).
 #'
 #' @param pool Objeto de conexión `pool`.
 #' @param registros Tibble con columnas `RegistroId`, `usuario_num`, `fecha` — ver
@@ -151,7 +152,7 @@ fetch_auditoria_legacy <- function(pool, registros) {
 
   datos <- dplyr::tbl(pool, "EvaluacionRegistro") |>
     dplyr::filter(RegistroId %in% !!registros$RegistroId) |>
-    dplyr::select(RegistroId, Resultado) |>
+    dplyr::select(Id, RegistroId, Resultado) |>
     dplyr::collect()
 
   # Sin filas de EvaluacionRegistro ligadas a estos RegistroId (encuesta sin auditoría
@@ -159,6 +160,12 @@ fetch_auditoria_legacy <- function(pool, registros) {
   # vacío no puede inferir las columnas del JSON (dictamenFinal, totalEvaluacion,
   # observaciones), lo que rompería el transmute() de abajo.
   if (nrow(datos) == 0) return(vacio)
+
+  # Re-capturas del mismo RegistroId (re-evaluación manual): vale la última fila.
+  datos <- datos |>
+    dplyr::group_by(RegistroId) |>
+    dplyr::slice_max(Id, n = 1, with_ties = FALSE) |>
+    dplyr::ungroup()
 
   datos |>
     parsear_veredicto_json("Resultado") |>

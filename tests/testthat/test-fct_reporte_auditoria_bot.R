@@ -101,6 +101,7 @@ test_that("obtener_evaluaciones('combinar') privilegia el bot sobre el legado, u
   ))
 
   DBI::dbWriteTable(con, "EvaluacionRegistro", data.frame(
+    Id = c(1L, 2L),
     RegistroId = c(1L, 3L),
     Resultado = c(
       veredicto_json("Diálogo Deficiente", 1, "legado, debe perder frente al bot"),
@@ -125,4 +126,23 @@ test_that("obtener_evaluaciones('combinar') privilegia el bot sobre el legado, u
   fila_2 <- res[res$RegistroId == 2, ]
   expect_equal(fila_2$dictamenFinal, "Diálogo Deficiente")
   expect_equal(fila_2$observaciones, "corregido por humano")
+})
+
+test_that("fetch_auditoria_legacy colapsa re-capturas del mismo RegistroId quedándose con la última (Id más alto)", {
+  con <- DBI::dbConnect(RSQLite::SQLite(), ":memory:")
+  on.exit(DBI::dbDisconnect(con))
+  DBI::dbWriteTable(con, "EvaluacionRegistro", data.frame(
+    Id = c(1L, 2L),
+    RegistroId = c(1L, 1L),
+    Resultado = c(
+      veredicto_json("Diálogo Deficiente", 1, "primera captura"),
+      veredicto_json("Diálogo Óptimo", 5, "recaptura, debe ganar")
+    ),
+    stringsAsFactors = FALSE
+  ))
+  registros <- tibble::tibble(RegistroId = 1L, usuario_num = "101", fecha = as.Date("2026-06-01"))
+  res <- fetch_auditoria_legacy(con, registros)
+  expect_equal(nrow(res), 1)
+  expect_equal(res$dictamenFinal, "Diálogo Óptimo")
+  expect_equal(res$observaciones, "recaptura, debe ganar")
 })
