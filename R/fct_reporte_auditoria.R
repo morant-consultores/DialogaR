@@ -104,6 +104,27 @@ parsear_veredicto_json <- function(df, col_json) {
 #'
 #' @keywords internal
 registros_efectivos <- function(pool, encuesta_id, fecha_inicio = NULL, fecha_fin = NULL) {
+  registros_efectivos_tbl(pool, encuesta_id, fecha_inicio, fecha_fin) |>
+    dplyr::collect() |>
+    dplyr::mutate(fecha = as.Date(FechaInicio)) |>
+    dplyr::select(RegistroId, usuario_num, fecha)
+}
+
+#' Diálogos efectivos como consulta perezosa (sin materializar)
+#'
+#' @description
+#' Misma selección que \code{\link{registros_efectivos}} pero sin `collect()`. Sirve para
+#' filtrar otras tablas con `semi_join()` y que SQL Server resuelva el cruce con una
+#' subconsulta, en vez de enviar el histórico completo como lista `IN (...)`: con decenas
+#' de miles de `RegistroId` el motor rechaza la consulta (error 8632, límite de servicios
+#' de expresión).
+#'
+#' @inheritParams registros_efectivos
+#'
+#' @return `tbl_lazy` con columnas `RegistroId`, `usuario_num`, `FechaInicio`.
+#'
+#' @keywords internal
+registros_efectivos_tbl <- function(pool, encuesta_id, fecha_inicio = NULL, fecha_fin = NULL) {
   q <- dplyr::tbl(pool, "Registros") |>
     dplyr::filter(EncuestaId %in% encuesta_id, TipoRegistro == "Efectivo")
 
@@ -117,11 +138,26 @@ registros_efectivos <- function(pool, encuesta_id, fecha_inicio = NULL, fecha_fi
     q <- q |> dplyr::filter(FechaInicio >= fecha_inicio_dt, FechaInicio < fecha_fin_exclusiva_dt)
   }
 
-  q |>
-    dplyr::transmute(RegistroId = Id, usuario_num = UsuarioNum, FechaInicio) |>
-    dplyr::collect() |>
-    dplyr::mutate(fecha = as.Date(FechaInicio)) |>
-    dplyr::select(RegistroId, usuario_num, fecha)
+  q |> dplyr::transmute(RegistroId = Id, usuario_num = UsuarioNum, FechaInicio)
+}
+
+#' Filtrar una tabla de auditoría a los diálogos efectivos indicados
+#'
+#' @description
+#' Con `registros_tbl` (consulta perezosa de \code{\link{registros_efectivos_tbl}}) usa
+#' `semi_join()`, que se resuelve dentro de la base sin límite de tamaño. Sin `registros_tbl`
+#' cae a `RegistroId %in% registros$RegistroId`, válido solo para listas pequeñas.
+#'
+#' @param tbl `tbl_lazy` con columna `RegistroId`.
+#' @param registros Tibble local con `RegistroId`.
+#' @param registros_tbl `tbl_lazy` o `NULL`.
+#'
+#' @keywords internal
+filtrar_por_registros <- function(tbl, registros, registros_tbl = NULL) {
+  if (is.null(registros_tbl)) {
+    return(dplyr::filter(tbl, RegistroId %in% !!registros$RegistroId))
+  }
+  dplyr::semi_join(tbl, dplyr::select(registros_tbl, RegistroId), by = "RegistroId")
 }
 
 #' Obtener auditorías (fuente legado: EvaluacionRegistro)
@@ -138,12 +174,16 @@ registros_efectivos <- function(pool, encuesta_id, fecha_inicio = NULL, fecha_fi
 #' @param pool Objeto de conexión `pool`.
 #' @param registros Tibble con columnas `RegistroId`, `usuario_num`, `fecha` — ver
 #'   \code{\link{registros_efectivos}}.
+#' @param registros_tbl `tbl_lazy` de \code{\link{registros_efectivos_tbl}} con los mismos
+#'   diálogos que `registros`, o `NULL` (por defecto). Si se da, el cruce con la tabla de
+#'   auditoría se hace en la base con `semi_join()` en vez de una lista `IN (...)`, que con
+#'   decenas de miles de ids rebasa el límite de SQL Server (error 8632).
 #'
 #' @return Tibble normalizado con columnas `RegistroId`, `usuario_num`, `fecha`,
 #'   `dictamenFinal`, `totalEvaluacion`, `observaciones`.
 #'
 #' @keywords internal
-fetch_auditoria_legacy <- function(pool, registros) {
+fetch_auditoria_legacy <- function(pool, registros, registros_tbl = NULL) {
   vacio <- tibble::tibble(RegistroId = integer(), usuario_num = character(), fecha = as.Date(character()),
                           dictamenFinal = character(), totalEvaluacion = character(),
                           observaciones = character())
@@ -151,7 +191,7 @@ fetch_auditoria_legacy <- function(pool, registros) {
   if (!existe_tabla(pool, "EvaluacionRegistro")) return(vacio)
 
   datos <- dplyr::tbl(pool, "EvaluacionRegistro") |>
-    dplyr::filter(RegistroId %in% !!registros$RegistroId) |>
+    filtrar_por_registros(registros, registros_tbl) |>
     dplyr::select(Id, RegistroId, Resultado) |>
     dplyr::collect()
 
@@ -222,13 +262,17 @@ mssql_backend <- function(pool) {
 #' @param pool Objeto de conexión `pool`.
 #' @param registros Tibble con columnas `RegistroId`, `usuario_num`, `fecha` — ver
 #'   \code{\link{registros_efectivos}}.
+#' @param registros_tbl `tbl_lazy` de \code{\link{registros_efectivos_tbl}} con los mismos
+#'   diálogos que `registros`, o `NULL` (por defecto). Si se da, el cruce con la tabla de
+#'   auditoría se hace en la base con `semi_join()` en vez de una lista `IN (...)`, que con
+#'   decenas de miles de ids rebasa el límite de SQL Server (error 8632).
 #'
 #' @return Tibble normalizado con columnas `RegistroId`, `usuario_num`, `fecha`,
 #'   `dictamenFinal`, `totalEvaluacion`, `observaciones`.
 #'
 #' @importFrom tibble tibble
 #' @keywords internal
-fetch_auditoria_bot <- function(pool, registros) {
+fetch_auditoria_bot <- function(pool, registros, registros_tbl = NULL) {
   vacio <- tibble::tibble(RegistroId = integer(), usuario_num = character(), fecha = as.Date(character()),
                           dictamenFinal = character(), totalEvaluacion = character(),
                           observaciones = character())
@@ -245,8 +289,10 @@ fetch_auditoria_bot <- function(pool, registros) {
     }
   }
 
-  aud <- dplyr::tbl(pool, "ResultadoAuditoriaBot") |>
-    dplyr::filter(RegistroId %in% !!registros$RegistroId) |>
+  aud_filtrada <- dplyr::tbl(pool, "ResultadoAuditoriaBot") |>
+    filtrar_por_registros(registros, registros_tbl)
+
+  aud <- aud_filtrada |>
     cast_a_texto("VeredictoJson", "js") |>
     dplyr::select(Id, RegistroId, js) |>
     dplyr::collect()
@@ -260,8 +306,15 @@ fetch_auditoria_bot <- function(pool, registros) {
     dplyr::ungroup()
 
   # verificación HUMANA (si ya la hay): la última por auditoría
-  revision <- dplyr::tbl(pool, "RevisionAuditoriaBot") |>
-    dplyr::filter(ResultadoAuditoriaBotId %in% !!aud$Id) |>
+  # Sin registros_tbl se acota con los Id ya materializados; con él, con una subconsulta
+  # (incluye auditorías previas no vigentes, inocuo: el left_join de abajo solo usa las vigentes).
+  revision_tbl <- dplyr::tbl(pool, "RevisionAuditoriaBot")
+  revision_tbl <- if (is.null(registros_tbl)) {
+    dplyr::filter(revision_tbl, ResultadoAuditoriaBotId %in% !!aud$Id)
+  } else {
+    dplyr::semi_join(revision_tbl, dplyr::select(aud_filtrada, Id), by = c("ResultadoAuditoriaBotId" = "Id"))
+  }
+  revision <- revision_tbl |>
     cast_a_texto("VeredictoCorregido", "js_corregido") |>
     dplyr::select(Id, ResultadoAuditoriaBotId, js_corregido) |>
     dplyr::collect() |>
@@ -312,20 +365,24 @@ obtener_evaluaciones <- function(pool, encuesta_id, fuente_auditoria, fecha_inic
     # Reporte semanal: solo se necesita la semana en curso, se empuja el filtro a SQL
     # sobre Registros.FechaInicio (cuándo ocurrió el diálogo, no cuándo se auditó).
     registros <- registros_efectivos(pool, encuesta_id, fecha_inicio_au, fecha_fin_au)
-    return(fetch_auditoria_bot(pool, registros))
+    registros_tbl <- registros_efectivos_tbl(pool, encuesta_id, fecha_inicio_au, fecha_fin_au)
+    return(fetch_auditoria_bot(pool, registros, registros_tbl))
   }
 
   # "legacy"/"combinar": histórico completo de diálogos efectivos; el llamador filtra por
   # fecha del diálogo más adelante (evaluacion_sem en generar_reporte_metricas()).
+  # El cruce con las tablas de auditoría se hace en la base (semi_join sobre `registros_tbl`):
+  # una lista IN con el histórico completo rebasa el límite de SQL Server (error 8632).
   registros <- registros_efectivos(pool, encuesta_id)
+  registros_tbl <- registros_efectivos_tbl(pool, encuesta_id)
 
   if (fuente_auditoria == "legacy") {
-    return(fetch_auditoria_legacy(pool, registros))
+    return(fetch_auditoria_legacy(pool, registros, registros_tbl))
   }
 
   # "combinar": une ambas fuentes; el bot gana cuando el RegistroId existe en ambas.
-  legacy <- fetch_auditoria_legacy(pool, registros)
-  bot    <- fetch_auditoria_bot(pool, registros)
+  legacy <- fetch_auditoria_legacy(pool, registros, registros_tbl)
+  bot    <- fetch_auditoria_bot(pool, registros, registros_tbl)
   dplyr::bind_rows(bot, legacy |> dplyr::filter(!RegistroId %in% bot$RegistroId))
 }
 

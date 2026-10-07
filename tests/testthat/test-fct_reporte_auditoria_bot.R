@@ -146,3 +146,67 @@ test_that("fetch_auditoria_legacy colapsa re-capturas del mismo RegistroId qued�
   expect_equal(res$dictamenFinal, "Diálogo Óptimo")
   expect_equal(res$observaciones, "recaptura, debe ganar")
 })
+
+# --- Cruce en la base (semi_join) en vez de lista IN: error 8632 de SQL Server ----------
+
+crear_con_bot_y_registros <- function() {
+  con <- crear_con_bot()
+  # RegistroId 9 tiene auditoría de bot pero NO es diálogo efectivo (Cancelado): no debe entrar.
+  DBI::dbExecute(con, "INSERT INTO ResultadoAuditoriaBot VALUES (4, 9, '{}')")
+  DBI::dbWriteTable(con, "Registros", data.frame(
+    Id = c(1L, 2L, 9L),
+    EncuestaId = c(1L, 1L, 1L),
+    UsuarioNum = c("101", "102", "109"),
+    TipoRegistro = c("Efectivo", "Efectivo", "Cancelado"),
+    FechaInicio = c("2026-06-01 18:00:00", "2026-06-02 14:00:00", "2026-06-02 14:00:00"),
+    stringsAsFactors = FALSE
+  ))
+  con
+}
+
+test_that("filtrar_por_registros con registros_tbl no genera lista IN (evita el error 8632)", {
+  con <- crear_con_bot_y_registros()
+  on.exit(DBI::dbDisconnect(con))
+
+  # `registros` local enorme: con IN iría completo en el SQL; con semi_join no debe aparecer.
+  registros_grande <- tibble::tibble(RegistroId = seq_len(50000L))
+  sql <- dplyr::tbl(con, "ResultadoAuditoriaBot") |>
+    filtrar_por_registros(registros_grande, registros_efectivos_tbl(con, 1L)) |>
+    dbplyr::sql_render() |>
+    as.character()
+
+  expect_false(grepl("49999", sql)) # ningún RegistroId viaja en el SQL
+  expect_true(grepl("EXISTS", sql))
+})
+
+test_that("fetch_auditoria_bot con registros_tbl da lo mismo que con lista IN y excluye no efectivos", {
+  con <- crear_con_bot_y_registros()
+  on.exit(DBI::dbDisconnect(con))
+
+  registros <- registros_efectivos(con, 1L)
+  con_in  <- fetch_auditoria_bot(con, registros)
+  con_sql <- fetch_auditoria_bot(con, registros, registros_efectivos_tbl(con, 1L))
+
+  expect_equal(con_sql, con_in)
+  expect_setequal(con_sql$RegistroId, c(1L, 2L))
+  expect_equal(con_sql[con_sql$RegistroId == 2L, ]$observaciones, "corregido por humano")
+})
+
+test_that("fetch_auditoria_legacy con registros_tbl da lo mismo que con lista IN", {
+  con <- crear_con_bot_y_registros()
+  on.exit(DBI::dbDisconnect(con))
+  DBI::dbWriteTable(con, "EvaluacionRegistro", data.frame(
+    Id = c(1L, 2L, 3L),
+    RegistroId = c(1L, 2L, 9L),
+    Resultado = c(veredicto_json("Diálogo Óptimo", 5), veredicto_json("Diálogo Aceptable", 3),
+                  veredicto_json("Diálogo Deficiente", 1)),
+    stringsAsFactors = FALSE
+  ))
+
+  registros <- registros_efectivos(con, 1L)
+  con_in  <- fetch_auditoria_legacy(con, registros)
+  con_sql <- fetch_auditoria_legacy(con, registros, registros_efectivos_tbl(con, 1L))
+
+  expect_equal(con_sql, con_in)
+  expect_setequal(con_sql$RegistroId, c(1L, 2L))
+})
