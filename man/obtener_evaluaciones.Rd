@@ -22,6 +22,13 @@ obtener_evaluaciones(
 \item{fecha_inicio_au}{Fecha. Inicio de la ventana semanal de auditoría.}
 
 \item{fecha_fin_au}{Fecha. Fin de la ventana semanal de auditoría (el \code{corte}).}
+
+\item{fecha_inicio_horas, fecha_fin_horas}{Fechas (opcionales, deben indicarse juntas).
+Si se dan, \code{res_auditoria} agrega la columna \code{horas_jornada_promedio}: el promedio, por
+vocero, de la duración de su jornada (máximo de \code{fecha_fin} menos mínimo de
+\code{fecha_inicio} de sus registros de \code{bd_completa} en el día) sobre los días hábiles
+(lunes a viernes) de ese rango. Es un periodo independiente del auditado: pensado para
+la semana en curso mientras se audita la anterior. Ver \code{\link{horas_jornada_promedio}}.}
 }
 \value{
 Tibble normalizado con columnas \code{RegistroId}, \code{usuario_num}, \code{fecha},

@@ -4,13 +4,18 @@
 \alias{fetch_auditoria_bot}
 \title{Obtener auditorías (fuente bot: ResultadoAuditoriaBot)}
 \usage{
-fetch_auditoria_bot(pool, registros)
+fetch_auditoria_bot(pool, registros, registros_tbl = NULL)
 }
 \arguments{
 \item{pool}{Objeto de conexión \code{pool}.}
 
 \item{registros}{Tibble con columnas \code{RegistroId}, \code{usuario_num}, \code{fecha} — ver
 \code{\link{registros_efectivos}}.}
+
+\item{registros_tbl}{\code{tbl_lazy} de \code{\link{registros_efectivos_tbl}} con los mismos
+diálogos que \code{registros}, o \code{NULL} (por defecto). Si se da, el cruce con la tabla de
+auditoría se hace en la base con \code{semi_join()} en vez de una lista \code{IN (...)}, que con
+decenas de miles de ids rebasa el límite de SQL Server (error 8632).}
 }
 \value{
 Tibble normalizado con columnas \code{RegistroId}, \code{usuario_num}, \code{fecha},

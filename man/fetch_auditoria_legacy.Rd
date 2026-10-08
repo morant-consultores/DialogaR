@@ -4,13 +4,18 @@
 \alias{fetch_auditoria_legacy}
 \title{Obtener auditorías (fuente legado: EvaluacionRegistro)}
 \usage{
-fetch_auditoria_legacy(pool, registros)
+fetch_auditoria_legacy(pool, registros, registros_tbl = NULL)
 }
 \arguments{
 \item{pool}{Objeto de conexión \code{pool}.}
 
 \item{registros}{Tibble con columnas \code{RegistroId}, \code{usuario_num}, \code{fecha} — ver
 \code{\link{registros_efectivos}}.}
+
+\item{registros_tbl}{\code{tbl_lazy} de \code{\link{registros_efectivos_tbl}} con los mismos
+diálogos que \code{registros}, o \code{NULL} (por defecto). Si se da, el cruce con la tabla de
+auditoría se hace en la base con \code{semi_join()} en vez de una lista \code{IN (...)}, que con
+decenas de miles de ids rebasa el límite de SQL Server (error 8632).}
 }
 \value{
 Tibble normalizado con columnas \code{RegistroId}, \code{usuario_num}, \code{fecha},
@@ -22,6 +27,7 @@ con \code{EvaluacionRegistro} para obtener su veredicto. \code{fecha} en el resu
 diálogo (heredada de \code{registros}), no la de la auditoría. Algunas encuestas no tienen
 tabla \code{EvaluacionRegistro}, o la tienen pero sin filas ligadas a sus \code{RegistroId}
 (nunca usaron el flujo legado, o ya migraron por completo al bot); en ambos casos
-retorna un tibble vacío en vez de fallar.
+retorna un tibble vacío en vez de fallar. Si un \code{RegistroId} tiene más de una fila
+(re-evaluación manual), vale la última (\code{Id} más alto).
 }
 \keyword{internal}

@@ -146,3 +146,28 @@ test_that("indicar solo uno de los dos límites del rango manual de efectivos pr
     "deben indicarse juntos"
   )
 })
+
+test_that("generar_reporte_metricas agrega horas_jornada_promedio solo a res_auditoria y solo si se piden", {
+  con <- crear_con_legacy()
+  on.exit(DBI::dbDisconnect(con))
+  bd <- tibble::tibble(
+    usuario_num = "001", fecha = as.Date(c("2026-07-25", "2026-08-03")), desglose = "Efectivo",
+    fecha_inicio = as.POSIXct(c("2026-07-25 16:00:00", "2026-08-03 16:00:00"), tz = "UTC"),
+    fecha_fin = as.POSIXct(c("2026-07-25 20:00:00", "2026-08-03 22:00:00"), tz = "UTC")
+  )
+  args <- list(pool = con, insumos = make_insumos(), bd_completa = bd, bd_aux = make_bd_aux(), encuesta_id = 1L,
+               corte = "2026-07-31", fecha_inicio_auditoria = as.Date("2026-07-25"), fecha_fin_auditoria = as.Date("2026-07-31"))
+
+  sin <- do.call(generar_reporte_metricas, args)
+  expect_false("horas_jornada_promedio" %in% names(sin$res_auditoria))
+
+  # Horas de la semana siguiente a la auditada (lun 3 de agosto, 6 h), no de la auditada.
+  con_h <- do.call(generar_reporte_metricas, c(args, list(fecha_inicio_horas = as.Date("2026-08-01"),
+                                                           fecha_fin_horas = as.Date("2026-08-07"))))
+  expect_equal(con_h$res_auditoria$horas_jornada_promedio[con_h$res_auditoria$vocero == "001"], 6)
+  expect_false("horas_jornada_promedio" %in% names(con_h$res_auditoria_hist))
+  expect_equal(con_h$res_auditoria$dialogos_auditados, sin$res_auditoria$dialogos_auditados)
+
+  expect_error(do.call(generar_reporte_metricas, c(args, list(fecha_inicio_horas = as.Date("2026-08-01")))),
+               "deben indicarse juntos")
+})
