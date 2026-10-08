@@ -353,6 +353,12 @@ fetch_auditoria_bot <- function(pool, registros, registros_tbl = NULL) {
 #'
 #' @param pool Objeto de conexión `pool`.
 #' @param encuesta_id Vector. Identificador(es) de encuesta.
+#' @param fecha_inicio_horas,fecha_fin_horas Fechas (opcionales, deben indicarse juntas).
+#'   Si se dan, `res_auditoria` agrega la columna `horas_jornada_promedio`: el promedio, por
+#'   vocero, de la duración de su jornada (máximo de `fecha_fin` menos mínimo de
+#'   `fecha_inicio` de sus registros de `bd_completa` en el día) sobre los días hábiles
+#'   (lunes a viernes) de ese rango. Es un periodo independiente del auditado: pensado para
+#'   la semana en curso mientras se audita la anterior. Ver \code{\link{horas_jornada_promedio}}.
 #' @param fuente_auditoria Caracter. Uno de `"legacy"`, `"bot"`, `"combinar"`.
 #' @param fecha_inicio_au Fecha. Inicio de la ventana semanal de auditoría.
 #' @param fecha_fin_au Fecha. Fin de la ventana semanal de auditoría (el `corte`).
@@ -476,8 +482,14 @@ generar_reporte_metricas <- function(pool,
                                      fecha_fin_auditoria = NULL,
                                      fecha_inicio_efectivos = NULL,
                                      fecha_fin_efectivos = NULL,
+                                     fecha_inicio_horas = NULL,
+                                     fecha_fin_horas = NULL,
                                      fuente_auditoria = c("legacy", "bot", "combinar")) {
   fuente_auditoria <- match.arg(fuente_auditoria)
+
+  if (xor(is.null(fecha_inicio_horas), is.null(fecha_fin_horas))) {
+    cli::cli_abort("fecha_inicio_horas y fecha_fin_horas deben indicarse juntos.")
+  }
 
   rango_auditoria_manual <- !is.null(fecha_inicio_auditoria) && !is.null(fecha_fin_auditoria)
   if (xor(is.null(fecha_inicio_auditoria), is.null(fecha_fin_auditoria))) {
@@ -653,6 +665,15 @@ generar_reporte_metricas <- function(pool,
   res_auditoria      <- ensamblar_hoja(hoja_registros_sem,       bd_prom_sem)
   res_auditoria_hist <- ensamblar_hoja(hoja_registros_hist_base,  bd_prom_hist)
 
+  # Horas de jornada promedio de OTRA semana (la actual, no la auditada): solo en la hoja semanal.
+  if (!is.null(fecha_inicio_horas)) {
+    res_auditoria <- res_auditoria |>
+      dplyr::left_join(
+        horas_jornada_promedio(bd_completa, as.Date(fecha_inicio_horas), as.Date(fecha_fin_horas)),
+        by = c("vocero" = "usuario_num")
+      )
+  }
+
   observaciones <- res_auditoria |>
     dplyr::select(nombre_brigada, nombre_vocero, vocero) |>
     dplyr::inner_join(
@@ -673,6 +694,41 @@ generar_reporte_metricas <- function(pool,
     observaciones      = observaciones,
     res_auditoria_hist = res_auditoria_hist
   ))
+}
+
+#' Horas de jornada promedio por vocero
+#'
+#' @description
+#' Para cada vocero y cada día hábil (lunes a viernes) del rango, la jornada es el máximo de
+#' `fecha_fin` menos el mínimo de `fecha_inicio` de todos sus registros de ese día (sean
+#' efectivos o no: mide el tiempo en campo, no la producción). Devuelve el promedio de esas
+#' jornadas por vocero. Los días sin registros no cuentan (no se promedian como cero), y no
+#' se recorta ninguna jornada atípica (p. ej. un registro dejado abierto toda la noche).
+#'
+#' @param bd_actividad Tibble de actividad con `usuario_num`, `fecha` (día del registro),
+#'   `fecha_inicio` y `fecha_fin` (`POSIXct`; la diferencia no depende de la zona horaria).
+#' @param desde,hasta Fechas (inclusive) del rango a promediar.
+#'
+#' @return Tibble con `usuario_num` y `horas_jornada_promedio` (horas, 2 decimales). Vacío si
+#'   el rango no tiene días hábiles con registros.
+#'
+#' @section Seguridad y Privacidad:
+#' Nivel de datos: INTERNO (actividad de voceros). No se usan datos de encuestados.
+#' Control ISO 27001: A.8.2 (Clasificación de información).
+#'
+#' @keywords internal
+horas_jornada_promedio <- function(bd_actividad, desde, hasta) {
+  bd_actividad |>
+    dplyr::filter(
+      fecha >= desde, fecha <= hasta,
+      lubridate::wday(fecha, week_start = 1) <= 5,
+      !is.na(fecha_inicio), !is.na(fecha_fin)
+    ) |>
+    dplyr::summarise(
+      horas = as.numeric(difftime(max(fecha_fin), min(fecha_inicio), units = "hours")),
+      .by = c(usuario_num, fecha)
+    ) |>
+    dplyr::summarise(horas_jornada_promedio = round(mean(horas), 2), .by = usuario_num)
 }
 
 #' Crear Libro de Excel para Reporte de Auditoría

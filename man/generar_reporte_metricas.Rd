@@ -20,6 +20,8 @@ generar_reporte_metricas(
   fecha_fin_auditoria = NULL,
   fecha_inicio_efectivos = NULL,
   fecha_fin_efectivos = NULL,
+  fecha_inicio_horas = NULL,
+  fecha_fin_horas = NULL,
   fuente_auditoria = c("legacy", "bot", "combinar")
 )
 
@@ -38,6 +40,8 @@ generar_metricas_auditoria(
   fecha_fin_auditoria = NULL,
   fecha_inicio_efectivos = NULL,
   fecha_fin_efectivos = NULL,
+  fecha_inicio_horas = NULL,
+  fecha_fin_horas = NULL,
   fuente_auditoria = c("legacy", "bot", "combinar")
 )
 }
