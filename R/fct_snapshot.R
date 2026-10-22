@@ -121,18 +121,19 @@ categorizar_ds <- function(
         list_respuestas <- list()
 
         list_respuestas$id = Id
-        list_respuestas$fecha_inicio = as_datetime(lubridate::force_tz(
-          FechaInicio,
-          tzone = "America/Mexico_City"
-        ))
-        list_respuestas$fecha_fin = as_datetime(lubridate::force_tz(
-          FechaFin,
-          tzone = "America/Mexico_City"
-        ))
-        list_respuestas$fecha = as_date(lubridate::force_tz(
-          FechaInicio,
-          tzone = "America/Mexico_City"
-        ))
+        # `FechaInicio`/`FechaFin` llegan de `tbl(pool, "Registros")` ya
+        # etiquetados tzone="UTC" por el driver, aunque el valor numérico es
+        # la hora local real (naive). Re-etiquetarlos aquí a
+        # "America/Mexico_City" antes de `dbAppendTable()` hacía que el
+        # driver los CONVIRTIERA a UTC al escribir (+6h) sobre una columna
+        # datetime2 sin huso horario -- confirmado 2026-10-22 reproduciendo
+        # el write con un Id real de snapshot_id_320 contra una tabla de
+        # prueba. Se escriben tal cual llegan (sin forzar tz) para que el
+        # viaje redondo no los recorra; `fecha` no se afectaba porque es un
+        # `Date`, sin huso horario que el driver pueda reinterpretar.
+        list_respuestas$fecha_inicio = as_datetime(FechaInicio)
+        list_respuestas$fecha_fin = as_datetime(FechaFin)
+        list_respuestas$fecha = as_date(FechaInicio)
         list_respuestas$usuario_num = UsuarioNum
         list_respuestas$isComplete = isComplete
         list_respuestas$duracion_minutos = round(
